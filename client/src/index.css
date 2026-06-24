@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --color-ink-950: #0a0f1a;
+  --color-ink-900: #0f172a;
+  --color-ink-800: #16203a;
+  --color-ink-700: #1f2c4d;
+
+  --color-signal-pass: #22c55e;
+  --color-signal-fail: #ef4444;
+  --color-signal-run: #facc15;
+  --color-signal-err: #f97316;
+  --color-signal-idle: #94a3b8;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #eef1f6;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(34, 197, 94, 0.25);
+}
+
+/* Status pulse for RUNNING gauge nodes */
+@keyframes ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.55); }
+  50%      { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0); }
+}
+.running-pulse { animation: ring-pulse 1.4s ease-in-out infinite; }
+
+/* Subtle scan-line sweep on the conveyor track */
+@keyframes sweep {
+  0%   { transform: translateX(-10%); opacity: 0; }
+  10%  { opacity: .5; }
+  90%  { opacity: .5; }
+  100% { transform: translateX(110%); opacity: 0; }
+}
+
+/* Thin scrollbars for data tables */
+.scroll-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+.tabular { font-family: var(--font-mono); font-feature-settings: "tnum"; }
