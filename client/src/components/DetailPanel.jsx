@@ -97,9 +97,20 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
     }
   };
 
-  if (!gaugeId) return null;
   const status = fixture?.status || "IDLE";
   const sClass = STATUS_TEXT_COLOR[status] || "text-slate-400";
+
+  if (!gaugeId) {
+    return (
+      <aside className="bg-white border rounded-xl shadow p-5 flex items-center justify-center text-center">
+        <div>
+          <h3 className="text-lg font-bold text-slate-700 font-display">Gauge details</h3>
+          <p className="text-sm text-slate-400 mt-2">Click any Pirani gauge on the track to view details here.</p>
+          <p className="text-xs text-slate-400 mt-1">Or use the scan panel to start a test.</p>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="bg-white border rounded-xl shadow p-5">

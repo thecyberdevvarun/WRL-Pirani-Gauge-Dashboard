@@ -91,15 +91,13 @@ export default function FixturesPage() {
 
           <ConveyorTrack fixtures={fixtures} onSelect={handleSelect} />
 
-          {selectedGaugeId && (
-            <DetailPanel
-              gaugeId={selectedGaugeId}
-              fixture={selectedFixture}
-              onStopped={() => {
-                refreshFixtures();
-              }}
-            />
-          )}
+          <DetailPanel
+            gaugeId={selectedGaugeId}
+            fixture={selectedFixture}
+            onStopped={() => {
+              refreshFixtures();
+            }}
+          />
         </div>
       </div>
 

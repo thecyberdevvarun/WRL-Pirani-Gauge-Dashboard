@@ -32,7 +32,7 @@ export default function ConveyorTrack({ fixtures, onSelect }) {
   const slots = useMemo(buildSlots, []);
 
   return (
-    <section className="relative bg-white border rounded-xl shadow h-[600px] overflow-hidden">
+    <section className="relative bg-white border rounded-xl shadow h-150 overflow-hidden">
       <div className="absolute top-3 right-4 text-xs text-slate-400 font-medium">↓ ENTRY</div>
       <div className="absolute bottom-3 right-4 text-xs text-slate-400 font-medium">↑ EXIT</div>
 
