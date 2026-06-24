@@ -1,7 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FiActivity } from "react-icons/fi";
-
-const BOUNDS = { left: 40, top: 36, right: 860, bottom: 524 };
 
 const COLOR_MAP = {
   green: "bg-signal-pass text-white",
@@ -11,73 +9,86 @@ const COLOR_MAP = {
   gray: "bg-signal-idle text-white",
 };
 
-/** Computes evenly-spaced perimeter coordinates around the rectangle-with-rounded-ends track. */
-function buildSlots(slotCount) {
-  const { left, top, right, bottom } = BOUNDS;
-  const w = right - left;
-  const h = bottom - top;
-  const spacing = (2 * (w + h)) / slotCount;
-  const slots = [];
-  for (let i = 0; i < slotCount; i++) {
-    let d = i * spacing;
-    if (d <= w) slots.push({ x: left + d, y: top });
-    else if ((d -= w) <= h) slots.push({ x: right, y: top + d });
-    else if ((d -= h) <= w) slots.push({ x: right - d, y: bottom });
-    else slots.push({ x: left, y: bottom - (d - w) });
-  }
-  return slots;
-}
+export default function ConveyorTrack({
+  fixtures,
+  gaugeCount,
+  lineLabel,
+  onSelect,
+}) {
+  const pathRef = useRef(null);
+  const [points, setPoints] = useState([]);
 
-export default function ConveyorTrack({ fixtures, gaugeCount, lineLabel, onSelect }) {
-  const slots = useMemo(() => buildSlots(Math.max(gaugeCount, 1)), [gaugeCount]);
+  // 🔥 Compute positions ON the curved rectangle
+  useEffect(() => {
+    if (!pathRef.current || gaugeCount === 0) return;
+
+    const path = pathRef.current;
+    const length = path.getTotalLength();
+
+    const newPoints = [];
+    for (let i = 0; i < gaugeCount; i++) {
+      const pt = path.getPointAtLength((i / gaugeCount) * length);
+      newPoints.push(pt);
+    }
+
+    setPoints(newPoints);
+  }, [gaugeCount]);
 
   if (!gaugeCount) {
     return (
-      <section className="relative bg-white border rounded-xl shadow h-150 overflow-hidden flex items-center justify-center">
-        <div className="text-center text-slate-400 max-w-xs">
-          <FiActivity className="mx-auto text-4xl mb-3 text-slate-300" />
-          <p className="font-semibold text-slate-500">Please select a line</p>
-          <p className="text-sm mt-1">
-            Select a conveyor line at login to view its vacuum pumps / Pirani gauges.
-          </p>
+      <section className="relative bg-white border rounded-xl shadow w-full aspect-[16/10] flex items-center justify-center">
+        <div className="text-center text-slate-400">
+          <FiActivity className="mx-auto text-4xl mb-3" />
+          <p>Please select a line</p>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="relative bg-white border rounded-xl shadow h-150 overflow-hidden">
+    <section className="relative bg-white border rounded-xl shadow w-full aspect-[16/10]">
+      {/* Title */}
       <div className="absolute top-3 left-4 text-xs font-semibold text-slate-500">
         {lineLabel} — {gaugeCount} gauges
       </div>
-      <div className="absolute top-3 right-4 text-xs text-slate-400 font-medium">↓ ENTRY</div>
-      <div className="absolute bottom-3 right-4 text-xs text-slate-400 font-medium">↑ EXIT</div>
 
-      {/* the track itself, drawn as a rounded rectangle outline */}
-      <div
-        className="absolute border-2 border-dashed border-slate-200 rounded-[120px]"
-        style={{
-          left: BOUNDS.left - 22,
-          top: BOUNDS.top - 22,
-          width: BOUNDS.right - BOUNDS.left + 44,
-          height: BOUNDS.bottom - BOUNDS.top + 44,
-        }}
-      />
+      {/* SVG Track */}
+      <svg className="absolute inset-0 w-full h-full">
+        <rect
+          ref={pathRef}
+          x="5%"
+          y="5%"
+          width="90%"
+          height="90%"
+          rx="15%" // 🔥 rounded corners
+          ry="15%"
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth="2"
+          strokeDasharray="6 6"
+        />
+      </svg>
 
+      {/* Gauges */}
       <div className="absolute inset-0">
-        {fixtures.map((f) => {
-          const slot = slots[(f.slave_id - 1) % slots.length];
-          if (!slot) return null;
+        {fixtures.map((f, i) => {
+          const pt = points[(f.slave_id - 1) % points.length];
+          if (!pt) return null;
+
           return (
             <button
-              type="button"
               key={f.slave_id}
               onClick={() => onSelect(f.slave_id)}
-              title={`Gauge ${f.slave_id} — ${f.status}${f.serial_no ? " | " + f.serial_no : ""}`}
-              className={`absolute w-11 h-11 rounded-full flex items-center justify-center font-bold shadow text-xs select-none transition-transform hover:scale-110 tabular ${
-                COLOR_MAP[f.color] || COLOR_MAP.gray
-              } ${f.status === "RUNNING" ? "running-pulse" : ""}`}
-              style={{ left: slot.x - 22, top: slot.y - 22 }}
+              title={`Gauge ${f.slave_id}`}
+              className={`absolute flex items-center justify-center rounded-full font-bold shadow
+                w-[clamp(28px,4vw,44px)] h-[clamp(28px,4vw,44px)]
+                ${COLOR_MAP[f.color] || COLOR_MAP.gray}
+              `}
+              style={{
+                left: pt.x,
+                top: pt.y,
+                transform: "translate(-50%, -50%)",
+              }}
             >
               {f.slave_id}
             </button>
