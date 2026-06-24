@@ -1,0 +1,6 @@
+flask
+pymodbus==2.5.3
+pandas
+pyodbc
+cachetools
+pytest
