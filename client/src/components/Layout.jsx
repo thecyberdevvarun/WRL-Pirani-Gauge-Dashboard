@@ -1,7 +1,10 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { FiActivity, FiList, FiBarChart2, FiWifi, FiWifiOff } from "react-icons/fi";
+import { useDispatch, useSelector } from "react-redux";
+import { FiActivity, FiList, FiBarChart2, FiWifi, FiWifiOff, FiLogOut, FiUser } from "react-icons/fi";
 import { getHealth } from "../api/client";
+import { logout } from "../store/authSlice";
+import { getLineConfig } from "../config/lines";
 
 const NAV_ITEMS = [
   { to: "/", label: "Live Floor", icon: FiActivity },
@@ -11,6 +14,10 @@ const NAV_ITEMS = [
 
 export default function Layout() {
   const [online, setOnline] = useState(true);
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { username, role, line } = useSelector((s) => s.auth);
+  const lineConfig = getLineConfig(line);
 
   useEffect(() => {
     let mounted = true;
@@ -25,6 +32,11 @@ export default function Layout() {
       clearInterval(t);
     };
   }, []);
+
+  const handleLogout = () => {
+    dispatch(logout());
+    navigate("/login", { replace: true });
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -57,7 +69,7 @@ export default function Layout() {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2 text-xs font-medium">
+          <div className="ml-auto flex items-center gap-4 text-xs font-medium">
             {online ? (
               <span className="flex items-center gap-1.5 text-signal-pass">
                 <FiWifi /> SYSTEM ONLINE
@@ -67,6 +79,23 @@ export default function Layout() {
                 <FiWifiOff /> SYSTEM OFFLINE
               </span>
             )}
+
+            <span className="flex items-center gap-1.5 text-slate-300 border-l border-white/10 pl-4">
+              <FiUser />
+              <span className="capitalize">{username}</span>
+              <span className="text-slate-500 text-[10px] uppercase">({role})</span>
+              <span className="text-slate-500">·</span>
+              <span>{lineConfig?.label || line || "No line"}</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Logout"
+              className="flex items-center gap-1.5 text-slate-400 hover:text-rose-400 transition-colors"
+            >
+              <FiLogOut /> Logout
+            </button>
           </div>
         </div>
       </header>

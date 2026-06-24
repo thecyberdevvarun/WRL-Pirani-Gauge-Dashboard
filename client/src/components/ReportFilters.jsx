@@ -1,4 +1,5 @@
 import { FiSearch, FiDownload } from "react-icons/fi";
+import { LINES as LINE_CONFIG } from "../config/lines";
 
 const QUICK_RANGES = [
   { label: "Today", days: 0 },
@@ -6,8 +7,6 @@ const QUICK_RANGES = [
   { label: "Last 7 Days", days: 7 },
   { label: "Last 30 Days", days: 30 },
 ];
-
-const LINES = ["FREEZER", "SUS", "CHOCOLATE"];
 
 export default function ReportFilters({ filters, setFilters, onSearch, onExport, onQuickRange }) {
   const update = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
@@ -61,9 +60,9 @@ export default function ReportFilters({ filters, setFilters, onSearch, onExport,
           <label className="block text-xs font-medium mb-1">Line</label>
           <select value={filters.line} onChange={update("line")} className="w-full px-3 py-2 border rounded text-sm">
             <option value="">All Lines</option>
-            {LINES.map((l) => (
-              <option key={l} value={l}>
-                {l.charAt(0) + l.slice(1).toLowerCase()}
+            {LINE_CONFIG.map((l) => (
+              <option key={l.key} value={l.key}>
+                {l.label}
               </option>
             ))}
           </select>

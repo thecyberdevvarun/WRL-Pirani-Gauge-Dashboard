@@ -1,15 +1,9 @@
 import { useState } from "react";
+import { useSelector } from "react-redux";
 import { FiPlay } from "react-icons/fi";
 import { getRecipeByModel, startTest as startTestApi } from "../api/client";
 import { toast } from "react-hot-toast";
-
-const LINES = [
-  { label: "Select Line", value: "" },
-  { label: "FREEZER", value: "Freezer" },
-  { label: "CHOCOLATE", value: "Chocolate" },
-  { label: "VISI COOLER", value: "Visi" },
-  { label: "SUS", value: "Sus" },
-];
+import { getLineConfig } from "../config/lines";
 
 function extractModelCode(serial) {
   return serial.substring(2, 6);
@@ -25,9 +19,11 @@ function validateSerial(serial) {
   return { ok: true };
 }
 
-export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
-  // using react-hot-toast
-  const [line, setLine] = useState("");
+export default function ScanPanel({ gaugeId, gaugeCount, onGaugeIdChange, onStarted }) {
+  const line = useSelector((s) => s.auth.line);
+  const lineConfig = getLineConfig(line);
+  const maxGauge = gaugeCount || lineConfig?.gaugeCount || 0;
+
   const [serial, setSerial] = useState("");
   const [modelCode, setModelCode] = useState("");
   const [modelName, setModelName] = useState("");
@@ -48,14 +44,16 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
   };
 
   const handleStart = async () => {
+    if (!line) return toast.error("No line selected — please log in again");
+
     const serialNo = serial.trim();
     const gid = parseInt(gaugeId, 10);
 
     if (!serialNo) return toast.error("Serial number required");
     const v = validateSerial(serialNo);
     if (!v.ok) return toast.error(v.msg);
-    if (!gid || gid < 1 || gid > 64)
-      return toast.error("Enter a valid Gauge ID (1–64)");
+    if (!gid || gid < 1 || gid > maxGauge)
+      return toast.error(`Enter a valid Gauge ID (1–${maxGauge})`);
 
     const code = extractModelCode(serialNo);
     setStarting(true);
@@ -95,23 +93,13 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
 
   return (
     <section className="bg-white border rounded-xl p-5 shadow">
-      <h3 className="text-base font-semibold text-emerald-600 mb-4 font-display flex items-center gap-1.5">
+      <h3 className="text-base font-semibold text-emerald-600 mb-1 font-display flex items-center gap-1.5">
         <FiPlay /> Start Test
       </h3>
-
-      <label className="block text-xs mb-1 text-slate-500">Conveyor Line</label>
-      <select
-        value={line}
-        onChange={(e) => setLine(e.target.value)}
-        aria-label="Conveyor Line"
-        className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
-      >
-        {LINES.map((l) => (
-          <option key={l.value} value={l.value}>
-            {l.label}
-          </option>
-        ))}
-      </select>
+      <p className="text-xs text-slate-400 mb-4">
+        Line: <span className="font-semibold text-slate-600">{lineConfig?.label || "—"}</span>
+        {maxGauge ? ` · Gauges 1–${maxGauge}` : ""}
+      </p>
 
       <label className="block text-xs mb-1 text-slate-500">Serial Number</label>
       <input
@@ -128,10 +116,10 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
       <input
         type="number"
         min={1}
-        max={64}
+        max={maxGauge || undefined}
         value={gaugeId}
         onChange={(e) => onGaugeIdChange(e.target.value)}
-        placeholder="1 – 64"
+        placeholder={maxGauge ? `1 – ${maxGauge}` : "—"}
         className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
       />
 

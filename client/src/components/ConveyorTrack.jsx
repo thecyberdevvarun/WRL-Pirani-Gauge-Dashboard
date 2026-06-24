@@ -1,6 +1,6 @@
 import { useMemo } from "react";
+import { FiActivity } from "react-icons/fi";
 
-const SLOT_COUNT = 64;
 const BOUNDS = { left: 40, top: 36, right: 860, bottom: 524 };
 
 const COLOR_MAP = {
@@ -12,13 +12,13 @@ const COLOR_MAP = {
 };
 
 /** Computes evenly-spaced perimeter coordinates around the rectangle-with-rounded-ends track. */
-function buildSlots() {
+function buildSlots(slotCount) {
   const { left, top, right, bottom } = BOUNDS;
   const w = right - left;
   const h = bottom - top;
-  const spacing = (2 * (w + h)) / SLOT_COUNT;
+  const spacing = (2 * (w + h)) / slotCount;
   const slots = [];
-  for (let i = 0; i < SLOT_COUNT; i++) {
+  for (let i = 0; i < slotCount; i++) {
     let d = i * spacing;
     if (d <= w) slots.push({ x: left + d, y: top });
     else if ((d -= w) <= h) slots.push({ x: right, y: top + d });
@@ -28,11 +28,28 @@ function buildSlots() {
   return slots;
 }
 
-export default function ConveyorTrack({ fixtures, onSelect }) {
-  const slots = useMemo(buildSlots, []);
+export default function ConveyorTrack({ fixtures, gaugeCount, lineLabel, onSelect }) {
+  const slots = useMemo(() => buildSlots(Math.max(gaugeCount, 1)), [gaugeCount]);
+
+  if (!gaugeCount) {
+    return (
+      <section className="relative bg-white border rounded-xl shadow h-150 overflow-hidden flex items-center justify-center">
+        <div className="text-center text-slate-400 max-w-xs">
+          <FiActivity className="mx-auto text-4xl mb-3 text-slate-300" />
+          <p className="font-semibold text-slate-500">Please select a line</p>
+          <p className="text-sm mt-1">
+            Select a conveyor line at login to view its vacuum pumps / Pirani gauges.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="relative bg-white border rounded-xl shadow h-150 overflow-hidden">
+      <div className="absolute top-3 left-4 text-xs font-semibold text-slate-500">
+        {lineLabel} — {gaugeCount} gauges
+      </div>
       <div className="absolute top-3 right-4 text-xs text-slate-400 font-medium">↓ ENTRY</div>
       <div className="absolute bottom-3 right-4 text-xs text-slate-400 font-medium">↑ EXIT</div>
 
@@ -49,7 +66,7 @@ export default function ConveyorTrack({ fixtures, onSelect }) {
 
       <div className="absolute inset-0">
         {fixtures.map((f) => {
-          const slot = slots[(f.slave_id - 1) % SLOT_COUNT];
+          const slot = slots[(f.slave_id - 1) % slots.length];
           if (!slot) return null;
           return (
             <button

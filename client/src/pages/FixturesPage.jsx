@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSelector } from "react-redux";
 import TodayStatsBar from "../components/TodayStatsBar";
 import StatusCountersBar from "../components/StatusCountersBar";
 import StatusLegend from "../components/StatusLegend";
@@ -8,9 +9,13 @@ import DetailPanel from "../components/DetailPanel";
 import LastReportsTable from "../components/LastReportsTable";
 import { getFixtures, getReports, openFixturesStream } from "../api/client";
 import { toast } from "react-hot-toast";
+import { getLineConfig } from "../config/lines";
 
 export default function FixturesPage() {
-  // using react-hot-toast
+  const line = useSelector((s) => s.auth.line);
+  const lineConfig = getLineConfig(line);
+  const gaugeCount = lineConfig?.gaugeCount ?? 0;
+
   const [fixtures, setFixtures] = useState([]);
   const [lastReports, setLastReports] = useState([]);
   const [gaugeId, setGaugeId] = useState("");
@@ -23,10 +28,10 @@ export default function FixturesPage() {
   }, []);
 
   const refreshLastReports = useCallback(() => {
-    getReports({ limit: 10 })
+    getReports({ limit: 10, line: line || undefined })
       .then(setLastReports)
       .catch(() => {});
-  }, []);
+  }, [line]);
 
   // Prefer the realtime SSE stream; fall back to polling if it errors.
   useEffect(() => {
@@ -51,18 +56,24 @@ export default function FixturesPage() {
     return () => clearInterval(t);
   }, [refreshLastReports]);
 
+  // Only the gauges that belong to the currently selected line.
+  const lineFixtures = useMemo(
+    () => (gaugeCount ? fixtures.filter((f) => f.slave_id >= 1 && f.slave_id <= gaugeCount) : []),
+    [fixtures, gaugeCount]
+  );
+
   const counts = useMemo(() => {
     const c = { pass: 0, fail: 0, run: 0, idle: 0 };
-    fixtures.forEach((f) => {
+    lineFixtures.forEach((f) => {
       if (f.status === "PASS") c.pass++;
       else if (f.status === "FAIL") c.fail++;
       else if (f.status === "RUNNING") c.run++;
       else c.idle++;
     });
     return c;
-  }, [fixtures]);
+  }, [lineFixtures]);
 
-  const selectedFixture = fixtures.find((f) => f.slave_id === selectedGaugeId) || null;
+  const selectedFixture = lineFixtures.find((f) => f.slave_id === selectedGaugeId) || null;
 
   const handleSelect = (id) => {
     setGaugeId(String(id));
@@ -82,6 +93,7 @@ export default function FixturesPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_420px] gap-5 items-start">
           <ScanPanel
             gaugeId={gaugeId}
+            gaugeCount={gaugeCount}
             onGaugeIdChange={setGaugeId}
             onStarted={() => {
               refreshFixtures();
@@ -89,7 +101,12 @@ export default function FixturesPage() {
             }}
           />
 
-          <ConveyorTrack fixtures={fixtures} onSelect={handleSelect} />
+          <ConveyorTrack
+            fixtures={lineFixtures}
+            gaugeCount={gaugeCount}
+            lineLabel={lineConfig?.label}
+            onSelect={handleSelect}
+          />
 
           <DetailPanel
             gaugeId={selectedGaugeId}
