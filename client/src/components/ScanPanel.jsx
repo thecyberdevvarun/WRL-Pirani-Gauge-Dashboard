@@ -4,10 +4,11 @@ import { getRecipeByModel, startTest as startTestApi } from "../api/client";
 import { toast } from "react-hot-toast";
 
 const LINES = [
-  { value: "", label: "Select Line" },
-  { value: "FREEZER", label: "Freezer" },
-  { value: "SUS", label: "SUS" },
-  { value: "CHOCOLATE", label: "Chocolate" },
+  { label: "Select Line", value: "" },
+  { label: "FREEZER", value: "Freezer" },
+  { label: "CHOCOLATE", value: "Chocolate" },
+  { label: "VISI COOLER", value: "Visi" },
+  { label: "SUS", value: "Sus" },
 ];
 
 function extractModelCode(serial) {
@@ -15,9 +16,12 @@ function extractModelCode(serial) {
 }
 
 function validateSerial(serial) {
-  if (serial.length !== 15) return { ok: false, msg: "Serial must be exactly 15 characters" };
-  if (!serial.startsWith("S4")) return { ok: false, msg: "Serial must start with S4" };
-  if (!/^S4\d{13}$/.test(serial)) return { ok: false, msg: "Invalid serial format (S4 + 13 digits)" };
+  if (serial.length !== 15)
+    return { ok: false, msg: "Serial must be exactly 15 characters" };
+  if (!serial.startsWith("S4"))
+    return { ok: false, msg: "Serial must start with S4" };
+  if (!/^S4\d{13}$/.test(serial))
+    return { ok: false, msg: "Invalid serial format (S4 + 13 digits)" };
   return { ok: true };
 }
 
@@ -50,13 +54,14 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
     if (!serialNo) return toast.error("Serial number required");
     const v = validateSerial(serialNo);
     if (!v.ok) return toast.error(v.msg);
-    if (!gid || gid < 1 || gid > 64) return toast.error("Enter a valid Gauge ID (1–64)");
+    if (!gid || gid < 1 || gid > 64)
+      return toast.error("Enter a valid Gauge ID (1–64)");
 
     const code = extractModelCode(serialNo);
     setStarting(true);
     try {
       const recipe = await getRecipeByModel(code);
-        if (!recipe.exists) {
+      if (!recipe.exists) {
         setModelCode(code);
         setModelName("NOT DEFINED");
         toast("Recipe not found for this model", { icon: "⚠️" });
@@ -65,7 +70,12 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
       setModelCode(code);
       setModelName(recipe.model_name);
 
-      const res = await startTestApi({ serial_no: serialNo, gauge_id: gid, line, model_code: code });
+      const res = await startTestApi({
+        serial_no: serialNo,
+        gauge_id: gid,
+        line,
+        model_code: code,
+      });
       if (res.status === "STARTED") {
         toast.success(`Test started on Gauge ${gid}`);
         setSerial("");
@@ -151,7 +161,8 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
       </button>
 
       <p className="text-xs text-slate-400 mt-2 text-center">
-        Serial format: <code className="bg-slate-100 px-1 rounded">S4</code> + 4-digit model code + 9 digits
+        Serial format: <code className="bg-slate-100 px-1 rounded">S4</code> +
+        4-digit model code + 9 digits
       </p>
     </section>
   );

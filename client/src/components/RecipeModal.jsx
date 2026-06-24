@@ -58,7 +58,7 @@ export default function RecipeModal({ open, mode, initial, onClose, onSave }) {
       aria-modal="true"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-xl shadow-xl p-6 w-[440px]">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-110">
         <h3 className="text-lg font-semibold mb-4 text-emerald-700 font-display">{titles[mode]}</h3>
 
         <div className="space-y-3 text-sm">
