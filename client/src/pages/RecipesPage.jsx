@@ -3,10 +3,10 @@ import { FiPlus, FiSearch } from "react-icons/fi";
 import RecipeTable from "../components/RecipeTable";
 import RecipeModal from "../components/RecipeModal";
 import { listRecipes, saveRecipe, deleteRecipe as deleteRecipeApi } from "../api/client";
-import { useToast } from "../context/ToastContext";
+import { toast } from "react-hot-toast";
 
 export default function RecipesPage() {
-  const showToast = useToast();
+  // using react-hot-toast
   const [recipes, setRecipes] = useState([]);
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState({ open: false, mode: "add", initial: null });
@@ -14,7 +14,7 @@ export default function RecipesPage() {
   const loadRecipes = () =>
     listRecipes()
       .then(setRecipes)
-      .catch(() => showToast("Failed to load recipes", "error"));
+      .catch(() => toast.error("Failed to load recipes"));
 
   useEffect(() => {
     loadRecipes();
@@ -68,9 +68,9 @@ export default function RecipesPage() {
       await saveRecipe(payload);
       setModal({ open: false, mode: "add", initial: null });
       loadRecipes();
-      showToast(modal.mode === "edit" ? "Recipe updated" : "Recipe saved");
+      toast.success(modal.mode === "edit" ? "Recipe updated" : "Recipe saved");
     } catch (err) {
-      showToast(err.message, "error");
+      toast.error(err.message);
     }
   };
 
@@ -79,9 +79,9 @@ export default function RecipesPage() {
     try {
       await deleteRecipeApi(modelCode);
       loadRecipes();
-      showToast("Recipe deleted");
+      toast.success("Recipe deleted");
     } catch {
-      showToast("Delete failed", "error");
+      toast.error("Delete failed");
     }
   };
 

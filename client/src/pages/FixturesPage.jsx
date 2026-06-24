@@ -7,10 +7,10 @@ import ScanPanel from "../components/ScanPanel";
 import DetailPanel from "../components/DetailPanel";
 import LastReportsTable from "../components/LastReportsTable";
 import { getFixtures, getReports, openFixturesStream } from "../api/client";
-import { useToast } from "../context/ToastContext";
+import { toast } from "react-hot-toast";
 
 export default function FixturesPage() {
-  const showToast = useToast();
+  // using react-hot-toast
   const [fixtures, setFixtures] = useState([]);
   const [lastReports, setLastReports] = useState([]);
   const [gaugeId, setGaugeId] = useState("");
@@ -19,8 +19,8 @@ export default function FixturesPage() {
   const refreshFixtures = useCallback(() => {
     getFixtures()
       .then(setFixtures)
-      .catch(() => showToast("Could not refresh fixtures", "error"));
-  }, [showToast]);
+      .catch(() => toast.error("Could not refresh fixtures"));
+  }, []);
 
   const refreshLastReports = useCallback(() => {
     getReports({ limit: 10 })

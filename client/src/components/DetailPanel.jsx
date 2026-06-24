@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FiSquare } from "react-icons/fi";
 import { getFixtureDetail, getLiveVacuum, stopTest as stopTestApi } from "../api/client";
-import { useToast } from "../context/ToastContext";
+import { toast } from "react-hot-toast";
 import LiveVacuumChart from "./LiveVacuumChart";
 
 const STATUS_TEXT_COLOR = {
@@ -22,7 +22,7 @@ function formatRemaining(sec) {
 }
 
 export default function DetailPanel({ gaugeId, fixture, onStopped }) {
-  const showToast = useToast();
+  // using react-hot-toast
   const [detail, setDetail] = useState(null);
   const [liveValue, setLiveValue] = useState(null);
   const [chartData, setChartData] = useState([]);
@@ -37,7 +37,7 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
     tickRef.current = 0;
     getFixtureDetail(gaugeId)
       .then(setDetail)
-      .catch(() => showToast("Unable to load fixture details", "error"));
+      .catch(() => toast.error("Unable to load fixture details"));
   }, [gaugeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Seed countdown from the fixture's reported remaining time
@@ -86,14 +86,14 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
     if (!confirm(`Stop the running test on Gauge ${gaugeId}?`)) return;
     try {
       const res = await stopTestApi(gaugeId);
-      if (res.status === "STOPPED") {
-        showToast(`Test on Gauge ${gaugeId} stopped`, "warn");
+        if (res.status === "STOPPED") {
+        toast(`Test on Gauge ${gaugeId} stopped`, { icon: "⚠️" });
         onStopped?.();
       } else {
-        showToast(res.message || "No active test found", "info");
+        toast(res.message || "No active test found", { icon: "ℹ️" });
       }
     } catch {
-      showToast("Network error — could not stop test", "error");
+      toast.error("Network error — could not stop test");
     }
   };
 

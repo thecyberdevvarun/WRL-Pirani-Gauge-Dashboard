@@ -21,6 +21,7 @@ touched. This app only *calls* the existing API routes.
 - **react-router-dom** for the 3 routes
 - **react-icons** (`react-icons/fi`) instead of emoji
 - **recharts** instead of Chart.js for the live vacuum gauge chart and the trend modal chart
+ - **react-hot-toast** for lightweight toasts
 
 ## Project layout
 
@@ -28,7 +29,7 @@ touched. This app only *calls* the existing API routes.
 client/
   src/
     api/client.js        # every fetch() call to the Flask API lives here
-    context/ToastContext.jsx
+   (toasts handled by `react-hot-toast`)
     components/          # presentational + small stateful pieces
     pages/                # FixturesPage, RecipesPage, ReportsPage
 ```

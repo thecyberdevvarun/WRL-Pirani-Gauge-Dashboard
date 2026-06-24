@@ -33,7 +33,7 @@ export default function Layout() {
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-signal-pass shadow-[0_0_10px_2px_rgba(34,197,94,0.7)]" />
             <span className="font-display font-bold tracking-wide text-[15px] text-white">
-              PIRANI<span className="text-signal-pass"> LEAK TEST</span>
+              PIRANI<span className="text-signal-pass"> GAUGE DASHBOARD</span>
             </span>
           </div>
 

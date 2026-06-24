@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FiPlay } from "react-icons/fi";
 import { getRecipeByModel, startTest as startTestApi } from "../api/client";
-import { useToast } from "../context/ToastContext";
+import { toast } from "react-hot-toast";
 
 const LINES = [
   { value: "", label: "Select Line" },
@@ -22,7 +22,7 @@ function validateSerial(serial) {
 }
 
 export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
-  const showToast = useToast();
+  // using react-hot-toast
   const [line, setLine] = useState("");
   const [serial, setSerial] = useState("");
   const [modelCode, setModelCode] = useState("");
@@ -47,19 +47,19 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
     const serialNo = serial.trim();
     const gid = parseInt(gaugeId, 10);
 
-    if (!serialNo) return showToast("Serial number required", "error");
+    if (!serialNo) return toast.error("Serial number required");
     const v = validateSerial(serialNo);
-    if (!v.ok) return showToast(v.msg, "error");
-    if (!gid || gid < 1 || gid > 64) return showToast("Enter a valid Gauge ID (1–64)", "error");
+    if (!v.ok) return toast.error(v.msg);
+    if (!gid || gid < 1 || gid > 64) return toast.error("Enter a valid Gauge ID (1–64)");
 
     const code = extractModelCode(serialNo);
     setStarting(true);
     try {
       const recipe = await getRecipeByModel(code);
-      if (!recipe.exists) {
+        if (!recipe.exists) {
         setModelCode(code);
         setModelName("NOT DEFINED");
-        showToast("Recipe not found for this model", "warn");
+        toast("Recipe not found for this model", { icon: "⚠️" });
         return;
       }
       setModelCode(code);
@@ -67,17 +67,17 @@ export default function ScanPanel({ gaugeId, onGaugeIdChange, onStarted }) {
 
       const res = await startTestApi({ serial_no: serialNo, gauge_id: gid, line, model_code: code });
       if (res.status === "STARTED") {
-        showToast(`Test started on Gauge ${gid}`, "success");
+        toast.success(`Test started on Gauge ${gid}`);
         setSerial("");
         onGaugeIdChange("");
         setModelCode("");
         setModelName("");
         onStarted?.();
       } else {
-        showToast(res.message || "Error starting test", "error");
+        toast.error(res.message || "Error starting test");
       }
     } catch {
-      showToast("Network error — check server", "error");
+      toast.error("Network error — check server");
     } finally {
       setStarting(false);
     }
