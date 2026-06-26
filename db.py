@@ -1,14 +1,24 @@
-import pyodbc
 import os
-from datetime import datetime
 import uuid
+from datetime import datetime
+
+import pyodbc
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_CONFIG = {
     "server":   os.environ.get("DB_SERVER",   "10.100.95.160"),
     "database": os.environ.get("DB_NAME",     "Garuda_WRL_LIVE"),
     "username": os.environ.get("DB_USER",     "sa"),
-    "password": os.environ.get("DB_PASSWORD", "TnTMES@2022"),
+    "password": os.environ.get("DB_PASSWORD"),
 }
+
+if not DB_CONFIG["password"]:
+    raise RuntimeError(
+        "DB_PASSWORD is not set. Create a .env file (see .env.example) "
+        "or set the DB_PASSWORD environment variable before starting the app."
+    )
 
 
 def get_connection():

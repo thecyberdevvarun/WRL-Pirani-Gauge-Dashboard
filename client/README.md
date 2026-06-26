@@ -1,10 +1,12 @@
 # Pirani Leak Test — React Frontend
 
 This is a standalone **React + Tailwind CSS v4 + react-icons** rewrite of the
-three Flask/Jinja pages (`fixtures.html`, `recipes.html`, `reports.html`).
-It is a **frontend-only** project: nothing in the Flask app (`app.py`, `db.py`,
-`config.py`, `test_runner.py`, Modbus workers, SSE stream, DB schema) was
-touched. This app only *calls* the existing API routes.
+three Flask/Jinja pages (`fixtures.html`, `recipes.html`, `reports.html`),
+which have been removed. This is a **frontend-first** project: none of the
+Flask API logic (`db.py`, `config.py`, `test_runner.py`, Modbus workers, SSE
+stream, DB schema) was touched. `app.py` only changed to drop the old
+`render_template()` calls (the templates no longer exist) and to serve this
+app's production build instead — see "Building for production" below.
 
 ## Pages
 
@@ -60,15 +62,8 @@ cd client
 npm run build         # outputs client/dist
 ```
 
-Two ways to serve the build, your choice:
-
-1. **Same Flask server (recommended, zero extra infra):**
-   Point Flask's static handling at `client/dist` (or copy `dist/*` into
-   `static/` and `dist/index.html` into `templates/`), and add a catch-all
-   Flask route that returns that `index.html` for `/`, `/recipes`, `/reports`
-   so client-side routing works on refresh. No existing API routes change.
-2. **Separate static host / nginx:** serve `client/dist` from any static
-   file server or CDN, and reverse-proxy `/api`, `/start-test`,
-   `/stop-test` to the Flask app's port 5000.
-
-Either way, the backend code in this repository is unmodified.
+`app.py` already serves `client/dist` directly — once the build exists,
+running `python app.py` from the project root serves the React app on `/`,
+`/recipes`, `/reports` (client-side routing works on refresh too) **and**
+the API on the same port. No extra web server is required, though you can
+still put nginx in front of it if you want TLS, caching, etc.

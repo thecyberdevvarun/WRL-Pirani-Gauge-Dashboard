@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 from test_runner import get_active_tests, run_test, stop_test
 from db import get_connection
 import pandas as pd
@@ -23,7 +23,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+# The React app (client/) is built to client/dist and served as static
+# files by this same Flask process in production. See client/README.md.
+CLIENT_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client", "dist")
+
+app = Flask(__name__, static_folder=None)
 
 # =========================================================
 # GLOBALS
@@ -54,19 +58,27 @@ def db_safe(fn):
     return wrapper
 
 # =========================================================
-# UI ROUTES
+# UI ROUTES — serve the built React app (client/dist) in production.
+# In development the React app runs separately on Vite (npm run dev,
+# localhost:5173) and proxies API calls here, so these routes are not
+# used at all in dev. They only matter once `npm run build` has been
+# run and client/dist exists.
 # =========================================================
 @app.route("/")
-def home():
-    return render_template("fixtures.html")
+@app.route("/<path:path>")
+def serve_react_app(path=""):
+    if path and os.path.exists(os.path.join(CLIENT_DIST, path)):
+        return send_from_directory(CLIENT_DIST, path)
 
-@app.route("/recipes")
-def recipes_page():
-    return render_template("recipes.html")
+    index_path = os.path.join(CLIENT_DIST, "index.html")
+    if os.path.exists(index_path):
+        return send_from_directory(CLIENT_DIST, "index.html")
 
-@app.route("/reports")
-def reports_page():
-    return render_template("reports.html")
+    return jsonify({
+        "error": "Frontend build not found",
+        "hint": "Run `npm run build` inside client/, or use `npm run dev` "
+                "in client/ for local development (http://localhost:5173)."
+    }), 404
 
 # =========================================================
 # HEALTH CHECK

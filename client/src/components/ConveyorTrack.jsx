@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FiActivity } from "react-icons/fi";
 
 const COLOR_MAP = {
@@ -36,7 +36,7 @@ export default function ConveyorTrack({
 
   if (!gaugeCount) {
     return (
-      <section className="relative bg-white border rounded-xl shadow w-full aspect-[16/10] flex items-center justify-center">
+      <section className="relative bg-white border rounded-xl shadow w-full aspect-16/10 flex items-center justify-center">
         <div className="text-center text-slate-400">
           <FiActivity className="mx-auto text-4xl mb-3" />
           <p>Please select a line</p>
@@ -46,7 +46,7 @@ export default function ConveyorTrack({
   }
 
   return (
-    <section className="relative bg-white border rounded-xl shadow w-full aspect-[16/10]">
+    <section className="relative bg-white border rounded-xl shadow w-full aspect-16/10">
       {/* Title */}
       <div className="absolute top-3 left-4 text-xs font-semibold text-slate-500">
         {lineLabel} — {gaugeCount} gauges
@@ -71,7 +71,7 @@ export default function ConveyorTrack({
 
       {/* Gauges */}
       <div className="absolute inset-0">
-        {fixtures.map((f, i) => {
+        {fixtures.map((f) => {
           const pt = points[(f.slave_id - 1) % points.length];
           if (!pt) return null;
 

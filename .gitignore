@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Frontend
+client/node_modules/
+client/dist/
+
+# OS
+.DS_Store
