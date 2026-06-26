@@ -191,7 +191,7 @@ def recipe_master():
                 INSERT (model_code, model_name, lower_limit, upper_limit,
                         test_duration_min, poll_interval_sec)
                 VALUES (source.model_code, source.model_name, source.lower_limit,
-                        source.upper_limit, source.test_duration_min, source.poll_interval_sec)
+                        source.upper_limit, source.test_duration_min, source.poll_interval_sec);
         """, (d["model"], d.get("model_name", ""), ll, ul, duration, poll))
         conn.commit()
 
@@ -205,7 +205,6 @@ def recipe_master():
     rows = cur.fetchall()
     conn.close()
     return jsonify([dict(zip(cols, r)) for r in rows])
-
 
 @app.route("/api/recipes/<model_code>", methods=["DELETE"])
 @db_safe
