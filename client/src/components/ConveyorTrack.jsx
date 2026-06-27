@@ -18,7 +18,7 @@ export default function ConveyorTrack({
   const pathRef = useRef(null);
   const [points, setPoints] = useState([]);
 
-  // 🔥 Compute positions ON the curved rectangle
+  // Compute positions ON the curved rectangle
   useEffect(() => {
     if (!pathRef.current || gaugeCount === 0) return;
 
@@ -60,7 +60,7 @@ export default function ConveyorTrack({
           y="5%"
           width="90%"
           height="90%"
-          rx="15%" // 🔥 rounded corners
+          rx="15%" // rounded corners
           ry="15%"
           fill="none"
           stroke="#e2e8f0"

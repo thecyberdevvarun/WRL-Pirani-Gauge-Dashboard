@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { FiSquare } from "react-icons/fi";
-import { getFixtureDetail, getLiveVacuum, stopTest as stopTestApi } from "../api/client";
+import { FiSquare, FiAlertTriangle, FiInfo, FiClock } from "react-icons/fi";
+import {
+  getFixtureDetail,
+  getLiveVacuum,
+  stopTest as stopTestApi,
+} from "../api/client";
 import { toast } from "react-hot-toast";
 import LiveVacuumChart from "./LiveVacuumChart";
 
@@ -53,7 +57,10 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
   useEffect(() => {
     if (remaining === null) return;
     if (remaining <= 0) return;
-    const t = setInterval(() => setRemaining((r) => (r !== null && r > 0 ? r - 1 : r)), 1000);
+    const t = setInterval(
+      () => setRemaining((r) => (r !== null && r > 0 ? r - 1 : r)),
+      1000,
+    );
     return () => clearInterval(t);
   }, [remaining !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -72,7 +79,9 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
           tickRef.current += 1.5;
           setChartData((prev) => {
             const next = [...prev, { t: tickRef.current.toFixed(1), v }];
-            return next.length > MAX_POINTS ? next.slice(next.length - MAX_POINTS) : next;
+            return next.length > MAX_POINTS
+              ? next.slice(next.length - MAX_POINTS)
+              : next;
           });
         })
         .catch(() => setLiveValue(null));
@@ -86,11 +95,15 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
     if (!confirm(`Stop the running test on Gauge ${gaugeId}?`)) return;
     try {
       const res = await stopTestApi(gaugeId);
-        if (res.status === "STOPPED") {
-        toast(`Test on Gauge ${gaugeId} stopped`, { icon: "⚠️" });
+      if (res.status === "STOPPED") {
+        toast(`Test on Gauge ${gaugeId} stopped`, {
+          icon: <FiAlertTriangle />,
+        });
         onStopped?.();
       } else {
-        toast(res.message || "No active test found", { icon: "ℹ️" });
+        toast(res.message || "No active test found", {
+          icon: <FiInfo />,
+        });
       }
     } catch {
       toast.error("Network error — could not stop test");
@@ -104,9 +117,15 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
     return (
       <aside className="bg-white border rounded-xl shadow p-5 flex items-center justify-center text-center">
         <div>
-          <h3 className="text-lg font-bold text-slate-700 font-display">Gauge details</h3>
-          <p className="text-sm text-slate-400 mt-2">Click any Pirani gauge on the track to view details here.</p>
-          <p className="text-xs text-slate-400 mt-1">Or use the scan panel to start a test.</p>
+          <h3 className="text-lg font-bold text-slate-700 font-display">
+            Gauge details
+          </h3>
+          <p className="text-sm text-slate-400 mt-2">
+            Click any Pirani gauge on the track to view details here.
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            Or use the scan panel to start a test.
+          </p>
         </div>
       </aside>
     );
@@ -115,7 +134,9 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
   return (
     <aside className="bg-white border rounded-xl shadow p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-bold text-slate-700 font-display">Gauge {gaugeId}</h3>
+        <h3 className="text-lg font-bold text-slate-700 font-display">
+          Gauge {gaugeId}
+        </h3>
         <span className={`text-sm font-semibold ${sClass}`}>{status}</span>
       </div>
 
@@ -125,18 +146,22 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
         <>
           <div className="text-xs space-y-1 mb-3 text-slate-500">
             <div>
-              Serial: <b className="text-slate-800">{detail.serial_no || "—"}</b>
+              Serial:{" "}
+              <b className="text-slate-800">{detail.serial_no || "—"}</b>
             </div>
             <div>
-              Model: <b className="text-slate-800">{detail.model_code || "—"}</b> — {detail.model_name || "—"}
+              Model:{" "}
+              <b className="text-slate-800">{detail.model_code || "—"}</b> —{" "}
+              {detail.model_name || "—"}
             </div>
             <div>
               Line: <b className="text-slate-800">{detail.line_name || "—"}</b>
             </div>
             {status === "RUNNING" && (
               <>
-                <div className="text-amber-600 font-semibold pt-1">
-                  ⏱ Remaining: {formatRemaining(remaining) || "—"}
+                <div className="text-amber-600 font-semibold pt-1 flex items-center gap-1.5">
+                  <FiClock className="shrink-0" />
+                  <span>Remaining: {formatRemaining(remaining) || "—"}</span>
                 </div>
                 <button
                   type="button"
@@ -160,7 +185,8 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
           <LiveVacuumChart data={chartData} ll={detail.ll} ul={detail.ul} />
 
           <div className="text-xs mt-2 text-slate-500 tabular">
-            LL: <b>{detail.ll ?? "—"}</b> mbar &nbsp;|&nbsp; UL: <b>{detail.ul ?? "—"}</b> mbar
+            LL: <b>{detail.ll ?? "—"}</b> mbar &nbsp;|&nbsp; UL:{" "}
+            <b>{detail.ul ?? "—"}</b> mbar
             {detail.start_time && (
               <>
                 <br />

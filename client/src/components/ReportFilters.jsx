@@ -8,8 +8,15 @@ const QUICK_RANGES = [
   { label: "Last 30 Days", days: 30 },
 ];
 
-export default function ReportFilters({ filters, setFilters, onSearch, onExport, onQuickRange }) {
-  const update = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+export default function ReportFilters({
+  filters,
+  setFilters,
+  onSearch,
+  onExport,
+  onQuickRange,
+}) {
+  const update = (key) => (e) =>
+    setFilters((f) => ({ ...f, [key]: e.target.value }));
 
   return (
     <section className="bg-white rounded-xl shadow p-5 mb-4">
@@ -58,7 +65,11 @@ export default function ReportFilters({ filters, setFilters, onSearch, onExport,
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">Line</label>
-          <select value={filters.line} onChange={update("line")} className="w-full px-3 py-2 border rounded text-sm">
+          <select
+            value={filters.line}
+            onChange={update("line")}
+            className="w-full px-3 py-2 border rounded text-sm"
+          >
             <option value="">All Lines</option>
             {LINE_CONFIG.map((l) => (
               <option key={l.key} value={l.key}>
@@ -81,7 +92,11 @@ export default function ReportFilters({ filters, setFilters, onSearch, onExport,
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">Result</label>
-          <select value={filters.result} onChange={update("result")} className="w-full px-3 py-2 border rounded text-sm">
+          <select
+            value={filters.result}
+            onChange={update("result")}
+            className="w-full px-3 py-2 border rounded text-sm"
+          >
             <option value="">All</option>
             <option value="PASS">PASS</option>
             <option value="FAIL">FAIL</option>

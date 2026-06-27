@@ -19,7 +19,12 @@ function validateSerial(serial) {
   return { ok: true };
 }
 
-export default function ScanPanel({ gaugeId, gaugeCount, onGaugeIdChange, onStarted }) {
+export default function ScanPanel({
+  gaugeId,
+  gaugeCount,
+  onGaugeIdChange,
+  onStarted,
+}) {
   const line = useSelector((s) => s.auth.line);
   const lineConfig = getLineConfig(line);
   const maxGauge = gaugeCount || lineConfig?.gaugeCount || 0;
@@ -62,7 +67,9 @@ export default function ScanPanel({ gaugeId, gaugeCount, onGaugeIdChange, onStar
       if (!recipe.exists) {
         setModelCode(code);
         setModelName("NOT DEFINED");
-        toast("Recipe not found for this model", { icon: "⚠️" });
+        toast("Recipe not found for this model", {
+          icon: <FiAlertTriangle />,
+        });
         return;
       }
       setModelCode(code);
@@ -97,7 +104,10 @@ export default function ScanPanel({ gaugeId, gaugeCount, onGaugeIdChange, onStar
         <FiPlay /> Start Test
       </h3>
       <p className="text-xs text-slate-400 mb-4">
-        Line: <span className="font-semibold text-slate-600">{lineConfig?.label || "—"}</span>
+        Line:{" "}
+        <span className="font-semibold text-slate-600">
+          {lineConfig?.label || "—"}
+        </span>
         {maxGauge ? ` · Gauges 1–${maxGauge}` : ""}
       </p>
 

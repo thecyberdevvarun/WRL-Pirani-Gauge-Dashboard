@@ -3,7 +3,6 @@ import { useSelector } from "react-redux";
 import ReportFilters from "../components/ReportFilters";
 import ReportSummary from "../components/ReportSummary";
 import ReportTable from "../components/ReportTable";
-import TrendModal from "../components/TrendModal";
 import { getReports, exportReportsUrl } from "../api/client";
 
 function toISODate(d) {
@@ -27,7 +26,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [trendRow, setTrendRow] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   const runSearch = async (overrideFilters) => {
     const f = overrideFilters || filters;
@@ -37,6 +36,7 @@ export default function ReportsPage() {
     }
     setLoading(true);
     setError(null);
+    setExpandedId(null);
     try {
       const result = await getReports(f);
       setData(result);
@@ -84,11 +84,10 @@ export default function ReportsPage() {
         rows={hasSearched ? data : []}
         loading={loading}
         error={error}
-        onRowClick={setTrendRow}
+        expandedId={expandedId}
+        onToggleExpand={(testId) => setExpandedId((cur) => (cur === testId ? null : testId))}
         emptyMessage={hasSearched ? "No records found" : "Select a date range and click Search"}
       />
-
-      <TrendModal row={trendRow} onClose={() => setTrendRow(null)} />
     </main>
   );
 }

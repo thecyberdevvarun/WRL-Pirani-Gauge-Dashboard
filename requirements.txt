@@ -4,4 +4,5 @@ pandas
 pyodbc
 cachetools
 python-dotenv
+reportlab
 pytest

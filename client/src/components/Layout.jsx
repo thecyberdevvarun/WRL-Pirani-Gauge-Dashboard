@@ -1,7 +1,15 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { FiActivity, FiList, FiBarChart2, FiWifi, FiWifiOff, FiLogOut, FiUser } from "react-icons/fi";
+import {
+  FiActivity,
+  FiList,
+  FiBarChart2,
+  FiWifi,
+  FiWifiOff,
+  FiLogOut,
+  FiUser,
+} from "react-icons/fi";
 import { getHealth } from "../api/client";
 import { logout } from "../store/authSlice";
 import { getLineConfig } from "../config/lines";
@@ -83,7 +91,9 @@ export default function Layout() {
             <span className="flex items-center gap-1.5 text-slate-300 border-l border-white/10 pl-4">
               <FiUser />
               <span className="capitalize">{username}</span>
-              <span className="text-slate-500 text-[10px] uppercase">({role})</span>
+              <span className="text-slate-500 text-[10px] uppercase">
+                ({role})
+              </span>
               <span className="text-slate-500">·</span>
               <span>{lineConfig?.label || line || "No line"}</span>
             </span>

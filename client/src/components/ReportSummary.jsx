@@ -16,8 +16,13 @@ export default function ReportSummary({ data }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
       {cards.map((c) => (
-        <div key={c.label} className="bg-white rounded-xl shadow p-4 text-center">
-          <div className={`text-2xl font-bold tabular ${c.color}`}>{c.value}</div>
+        <div
+          key={c.label}
+          className="bg-white rounded-xl shadow p-4 text-center"
+        >
+          <div className={`text-2xl font-bold tabular ${c.color}`}>
+            {c.value}
+          </div>
           <div className="text-xs text-slate-400 mt-1">{c.label}</div>
         </div>
       ))}

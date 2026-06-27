@@ -5,7 +5,8 @@ const DOT = "w-3 h-3 rounded-full inline-block";
 
 export default function StatusCountersBar({ counts }) {
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    if (!document.fullscreenElement)
+      document.documentElement.requestFullscreen();
     else document.exitFullscreen();
   };
 

@@ -7,7 +7,7 @@ export default function LiveVacuumChart({ data, ll, ul }) {
   const pad = (safe.ul - safe.ll) * 0.18;
 
   return (
-    <div className="h-[170px]">
+    <div className="h-42.5">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />

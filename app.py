@@ -16,6 +16,11 @@ import math
 from pymodbus.client.sync import ModbusTcpClient
 from config import MODBUS
 import sys
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -205,6 +210,7 @@ def recipe_master():
     rows = cur.fetchall()
     conn.close()
     return jsonify([dict(zip(cols, r)) for r in rows])
+
 
 @app.route("/api/recipes/<model_code>", methods=["DELETE"])
 @db_safe
@@ -673,6 +679,131 @@ def report_trend(test_id):
         }
         for r in rows
     ])
+
+# =========================================================
+# REPORT PDF EXPORT  (single test: header info + every poll reading)
+# =========================================================
+@app.route("/api/report/<string:test_id>/pdf")
+@db_safe
+def report_pdf(test_id):
+    conn = get_connection()
+    cur  = conn.cursor()
+
+    cur.execute("""
+        SELECT test_id, gauge_id, serial_no, model_code, model_name,
+               line_name, final_result, start_time, end_time
+        FROM pirani_test_header
+        WHERE test_id = ?
+    """, (test_id,))
+    header_row = cur.fetchone()
+    if not header_row:
+        conn.close()
+        return jsonify({"error": "Test not found"}), 404
+    header = dict(zip([c[0] for c in cur.description], header_row))
+
+    cur.execute("""
+        SELECT log_time, vacuum, result
+        FROM pirani_test_log
+        WHERE test_id = ?
+        ORDER BY log_time
+    """, (test_id,))
+    readings = cur.fetchall()
+    conn.close()
+
+    def fmt_dt(v):
+        return str(v) if v else "—"
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        topMargin=18 * mm, bottomMargin=16 * mm, leftMargin=16 * mm, rightMargin=16 * mm
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("ReportTitle", parent=styles["Title"], fontSize=16, spaceAfter=4)
+    sub_style = ParagraphStyle("ReportSub", parent=styles["Normal"], textColor=colors.HexColor("#64748b"), fontSize=9)
+    h2_style = ParagraphStyle("ReportH2", parent=styles["Heading2"], fontSize=12, spaceBefore=2, spaceAfter=6)
+
+    elements = [
+        Paragraph("Pirani Gauge Test Report", title_style),
+        Paragraph(f"Test ID: {header['test_id']}", sub_style),
+        Spacer(1, 10),
+    ]
+
+    info_rows = [
+        ["Gauge",      str(header.get("gauge_id") or "—"), "Line",   header.get("line_name") or "—"],
+        ["Serial No.", header.get("serial_no") or "—",      "Model",  header.get("model_code") or "—"],
+        ["Model Name", header.get("model_name") or "—",     "Result", header.get("final_result") or "—"],
+        ["Start Time", fmt_dt(header.get("start_time")),    "End Time", fmt_dt(header.get("end_time"))],
+    ]
+    info_table = Table(info_rows, colWidths=[28 * mm, 55 * mm, 28 * mm, 55 * mm])
+    info_table.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#64748b")),
+        ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#64748b")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f8fafc")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements += [info_table, Spacer(1, 14)]
+
+    vacs = [float(r[1]) for r in readings if r[1] is not None]
+    if vacs:
+        stats_table = Table(
+            [
+                ["Min (mbar)", "Max (mbar)", "Avg (mbar)", "Readings"],
+                [f"{min(vacs):.3f}", f"{max(vacs):.3f}", f"{(sum(vacs) / len(vacs)):.3f}", str(len(vacs))],
+            ],
+            colWidths=[41.5 * mm] * 4,
+        )
+        stats_table.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements += [stats_table, Spacer(1, 14)]
+
+    elements.append(Paragraph("Readings Log", h2_style))
+
+    table_data = [["#", "Time", "Vacuum (mbar)", "Result"]]
+    for i, r in enumerate(readings, start=1):
+        table_data.append([
+            str(i),
+            str(r[0]),
+            f"{float(r[1]):.3f}" if r[1] is not None else "—",
+            r[2] or "—",
+        ])
+    if len(table_data) == 1:
+        table_data.append(["—", "No readings recorded", "", ""])
+
+    readings_table = Table(table_data, colWidths=[12 * mm, 55 * mm, 35 * mm, 25 * mm], repeatRows=1)
+    readings_table.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(readings_table)
+
+    doc.build(elements)
+    buf.seek(0)
+
+    return send_file(
+        buf, mimetype="application/pdf", as_attachment=True,
+        download_name=f"pirani_report_{test_id}.pdf"
+    )
 
 # =========================================================
 # APP START

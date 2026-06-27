@@ -29,12 +29,15 @@ export const getHealth = () => request("/api/health");
 export const getTodayStats = () => request("/api/stats/today");
 
 // ---- Recipes ----
-export const getRecipeByModel = (modelCode) => request(`/api/recipe/${encodeURIComponent(modelCode)}`);
+export const getRecipeByModel = (modelCode) =>
+  request(`/api/recipe/${encodeURIComponent(modelCode)}`);
 export const listRecipes = () => request("/api/recipes");
 export const saveRecipe = (payload) =>
   request("/api/recipes", { method: "POST", body: JSON.stringify(payload) });
 export const deleteRecipe = (modelCode) =>
-  request(`/api/recipes/${encodeURIComponent(modelCode)}`, { method: "DELETE" });
+  request(`/api/recipes/${encodeURIComponent(modelCode)}`, {
+    method: "DELETE",
+  });
 
 // ---- Test control ----
 export const startTest = (payload) =>
@@ -45,7 +48,8 @@ export const getActiveTests = () => request("/api/active-tests");
 
 // ---- Fixtures (live floor view) ----
 export const getFixtures = () => request("/api/fixtures");
-export const getLiveVacuum = (slaveId) => request(`/api/fixture-live/${slaveId}`);
+export const getLiveVacuum = (slaveId) =>
+  request(`/api/fixture-live/${slaveId}`);
 export const getFixtureDetail = (slaveId) => request(`/api/fixture/${slaveId}`);
 export const getModbusDiagnostics = () => request("/api/modbus/diagnostics");
 
@@ -71,6 +75,11 @@ export function buildReportsQuery(params) {
   });
   return qs.toString();
 }
-export const getReports = (params) => request(`/api/reports?${buildReportsQuery(params)}`);
-export const getReportTrend = (testId) => request(`/api/report/${encodeURIComponent(testId)}/trend`);
-export const exportReportsUrl = (params) => `/api/reports?${buildReportsQuery({ ...params, export: "excel" })}`;
+export const getReports = (params) =>
+  request(`/api/reports?${buildReportsQuery(params)}`);
+export const getReportTrend = (testId) =>
+  request(`/api/report/${encodeURIComponent(testId)}/trend`);
+export const exportReportsUrl = (params) =>
+  `/api/reports?${buildReportsQuery({ ...params, export: "excel" })}`;
+export const reportPdfUrl = (testId) =>
+  `/api/report/${encodeURIComponent(testId)}/pdf`;
