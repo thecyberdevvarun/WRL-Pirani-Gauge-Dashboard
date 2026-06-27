@@ -10,7 +10,7 @@ Operators start a test on a fixture, the backend polls the gauge over Modbus TCP
 <table align="center">
   <tr>
     <td align="center">
-      <strong>Live Floor Monitoring</strong><br><br>
+      <strong>Reports Dashboard</strong><br><br>
         <img src="https://github.com/user-attachments/assets/a2010ecf-bba8-4444-a44d-d3eb3e8d2730"
            alt="Reports"
            width="500"
@@ -27,7 +27,7 @@ Operators start a test on a fixture, the backend polls the gauge over Modbus TCP
   <tr>
     <td colspan="2" align="center">
       <br>
-      <strong>Reports Dashboard</strong><br><br>
+      <strong>Live Floor Monitoring</strong><br><br>
       <img src="https://github.com/user-attachments/assets/42174b56-111b-42d2-b410-93f211e908fb"
            alt="Live Floor"
            width="800"
