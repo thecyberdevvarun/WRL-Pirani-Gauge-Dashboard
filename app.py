@@ -616,14 +616,24 @@ def reports_api():
     df   = pd.read_sql(query, conn, params=params)
     conn.close()
 
-    for col in ["start_time", "end_time"]:
-        if col in df.columns:
-            df[col] = df[col].astype(str).replace("NaT", None)
-
     if "test_id" in df.columns:
         df["test_id"] = df["test_id"].astype(str)
 
     data = df.to_dict(orient="records")
+
+    # A running test has no end_time yet (and often no final_result / last
+    # reading). Depending on pandas dtype inference these missing values can
+    # come through as NaN/NaT rather than None, and json.dumps emits those
+    # as a bare `NaN` token, which is NOT valid JSON and breaks the browser's
+    # JSON.parse(). pd.isna() reliably detects NaN/NaT/None/pd.NA regardless
+    # of column dtype, so normalize everything to a real `None` here.
+    for row in data:
+        for key, value in row.items():
+            if pd.isna(value):
+                row[key] = None
+            elif isinstance(value, pd.Timestamp):
+                row[key] = str(value)
+
     REPORT_CACHE[cache_key] = data
 
     if request.args.get("export") == "excel":
