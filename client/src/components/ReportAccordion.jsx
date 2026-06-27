@@ -215,7 +215,9 @@ export default function ReportAccordion({ row }) {
               <tr>
                 <th className="px-3 py-1.5 text-left">Sr.No.</th>
                 <th className="px-3 py-1.5 text-left">Time</th>
-                <th className="px-3 py-1.5 text-right">Vacuum (mbar)</th>
+                <th className="px-3 py-1.5 text-center">Lower Limit</th>
+                <th className="px-3 py-1.5 text-center">Vacuum (mbar)</th>
+                <th className="px-3 py-1.5 text-center">Upper Limit</th>
                 <th className="px-3 py-1.5 text-center">Result</th>
               </tr>
             </thead>
@@ -226,8 +228,14 @@ export default function ReportAccordion({ row }) {
                   <td className="px-3 py-1 text-slate-600 whitespace-nowrap">
                     {fmtTime(r.time)}
                   </td>
-                  <td className="px-3 py-1 text-right font-mono tabular">
+                  <td className="px-3 py-1 text-center text-slate-600 whitespace-nowrap">
+                    {ll != null ? Number(ll).toFixed(3) : "—"}
+                  </td>
+                  <td className="px-3 py-1 text-center text-[#2563eb] font-semibold tabular">
                     {r.vacuum != null ? Number(r.vacuum).toFixed(3) : "—"}
+                  </td>
+                  <td className="px-3 py-1 text-center text-slate-600 whitespace-nowrap">
+                    {ul != null ? Number(ul).toFixed(3) : "—"}
                   </td>
                   <td className="px-3 py-1 text-center text-slate-500">
                     {r.result || "—"}

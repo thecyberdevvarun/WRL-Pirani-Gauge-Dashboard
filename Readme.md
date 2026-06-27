@@ -1,65 +1,31 @@
-# WRL Pirani Gauge Dashboard
+# Pirani Gauge Dashboard
 
 A real-time production-floor dashboard for testing and monitoring **Pirani vacuum gauges** on a manufacturing line — built to replace a manual, paper-based QC process with a live Modbus-driven web app.
 
 Operators start a test on a fixture, the backend polls the gauge over Modbus TCP at a configurable interval, results are logged to SQL Server, and engineers can pull pass/fail reports — complete with every individual reading and a one-click PDF export — without ever touching the floor PC.
 
 ---
-## 📸 Application Screenshots
-
-<table align="center">
-  <tr>
-    <td align="center">
-      <strong>Reports Dashboard</strong><br><br>
-        <img src="https://github.com/user-attachments/assets/a2010ecf-bba8-4444-a44d-d3eb3e8d2730"
-           alt="Reports"
-           width="500"
-           height="280"/>
-    </td>
-    <td align="center">
-      <strong>Recipe Management</strong><br><br>
-      <img src="https://github.com/user-attachments/assets/2664b341-daee-46c9-8fea-a2f3a5de6466"
-           alt="Recipes"
-           width="500"
-           height="280"/>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <br>
-      <strong>Live Floor Monitoring</strong><br><br>
-      <img src="https://github.com/user-attachments/assets/42174b56-111b-42d2-b410-93f211e908fb"
-           alt="Live Floor"
-           width="800"
-           height="450"/>
-    </td>
-  </tr>
-</table>
 
 ## ✨ Features
 
 **Live floor view**
-
 - Real-time fixture/conveyor visualization over Server-Sent Events (SSE), with automatic fallback to polling if the stream drops
 - Per-line gauge layout (configurable gauge count per production line)
 - Start / stop a test on any gauge directly from the UI
 - Live vacuum reading chart per fixture, today's pass/fail counters, and a rolling table of the last completed tests
 
 **Recipe management**
-
 - CRUD for test recipes (model code, lower/upper vacuum limits, test duration, poll interval)
 - Clone-from-existing recipe to speed up onboarding a new model
 
 **Reporting**
-
 - Filterable report search (date range, model, line, gauge, result)
-- Inline accordion per row — expand any test to see its full trend chart _and_ every single poll-interval reading logged during that run, no separate page load
+- Inline accordion per row — expand any test to see its full trend chart *and* every single poll-interval reading logged during that run, no separate page load
 - One-click **Excel export** of the filtered result set
 - One-click **PDF export** per test — header info, min/max/avg stats, and the complete readings log, generated server-side
 - Live Modbus diagnostics endpoint for troubleshooting gateway connectivity
 
 **Operator-friendly login**
-
 - Tap-to-login screen (no typing on a shop-floor touchscreen) with a line picker, so the dashboard always knows the gauge count for the active line
 
 ---
@@ -97,15 +63,15 @@ In production, the React build is served as static files by the same Flask proce
 
 ## 🧰 Tech stack
 
-| Layer               | Technology                                                            |
-| ------------------- | --------------------------------------------------------------------- |
-| Frontend            | React 19, Vite, Redux Toolkit, Tailwind CSS v4, Recharts, react-icons |
-| Backend             | Python, Flask, threading-based Modbus poller                          |
-| Industrial protocol | Modbus TCP (`pymodbus`)                                               |
-| Database            | Microsoft SQL Server (`pyodbc`)                                       |
-| Reporting           | `pandas` (Excel export), `reportlab` (PDF generation)                 |
-| Testing             | `pytest`                                                              |
-| Linting             | `oxlint`                                                              |
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, Vite, Redux Toolkit, Tailwind CSS v4, Recharts, react-icons |
+| Backend | Python, Flask, threading-based Modbus poller |
+| Industrial protocol | Modbus TCP (`pymodbus`) |
+| Database | Microsoft SQL Server (`pyodbc`) |
+| Reporting | `pandas` (Excel export), `reportlab` (PDF generation) |
+| Testing | `pytest` |
+| Linting | `oxlint` |
 
 ---
 
@@ -137,7 +103,6 @@ WRL-Pirani-Gauge-Dashboard/
 ## 🚀 Getting started
 
 ### Prerequisites
-
 - Python 3.10+
 - Node.js 18+
 - SQL Server reachable from the backend host
@@ -176,24 +141,24 @@ cd .. && python app.py        # now also serves the React build on the same port
 
 ## 🔌 API reference
 
-| Method     | Route                          | Description                                          |
-| ---------- | ------------------------------ | ---------------------------------------------------- |
-| GET        | `/api/health`                  | Gateway/poller health check                          |
-| GET        | `/api/stats/today`             | Today's pass/fail counters                           |
-| GET        | `/api/recipe/<model_code>`     | Fetch a single recipe                                |
-| GET / POST | `/api/recipes`                 | List recipes / create or update (upsert) a recipe    |
-| DELETE     | `/api/recipes/<model_code>`    | Delete a recipe                                      |
-| POST       | `/start-test`                  | Start a test on a gauge                              |
-| POST       | `/stop-test/<gauge_id>`        | Stop a running test                                  |
-| GET        | `/api/active-tests`            | Currently running tests                              |
-| GET        | `/api/fixtures`                | Snapshot of all fixture states                       |
-| GET        | `/api/fixtures/stream`         | SSE stream of live fixture state                     |
-| GET        | `/api/fixture-live/<slave_id>` | Live vacuum reading for one fixture                  |
-| GET        | `/api/fixture/<slave_id>`      | Fixture detail                                       |
-| GET        | `/api/modbus/diagnostics`      | Modbus gateway diagnostics                           |
-| GET        | `/api/reports`                 | Filterable report search (`?export=excel` for Excel) |
-| GET        | `/api/report/<test_id>/trend`  | Every poll reading for one test                      |
-| GET        | `/api/report/<test_id>/pdf`    | Download a PDF report for one test                   |
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/health` | Gateway/poller health check |
+| GET | `/api/stats/today` | Today's pass/fail counters |
+| GET | `/api/recipe/<model_code>` | Fetch a single recipe |
+| GET / POST | `/api/recipes` | List recipes / create or update (upsert) a recipe |
+| DELETE | `/api/recipes/<model_code>` | Delete a recipe |
+| POST | `/start-test` | Start a test on a gauge |
+| POST | `/stop-test/<gauge_id>` | Stop a running test |
+| GET | `/api/active-tests` | Currently running tests |
+| GET | `/api/fixtures` | Snapshot of all fixture states |
+| GET | `/api/fixtures/stream` | SSE stream of live fixture state |
+| GET | `/api/fixture-live/<slave_id>` | Live vacuum reading for one fixture |
+| GET | `/api/fixture/<slave_id>` | Fixture detail |
+| GET | `/api/modbus/diagnostics` | Modbus gateway diagnostics |
+| GET | `/api/reports` | Filterable report search (`?export=excel` for Excel) |
+| GET | `/api/report/<test_id>/trend` | Every poll reading for one test |
+| GET | `/api/report/<test_id>/pdf` | Download a PDF report for one test |
 
 ---
 
@@ -201,11 +166,11 @@ cd .. && python app.py        # now also serves the React build on the same port
 
 All secrets and host addresses are environment-driven via `.env` (see `.env.example`) — nothing is hardcoded in source:
 
-| Variable                                         | Purpose                                                                                                         |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `DB_SERVER`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | SQL Server connection                                                                                           |
-| `MODBUS_HOST`, `MODBUS_PORT`                     | Modbus TCP gateway                                                                                              |
-| `DISABLE_WORKERS`                                | Set to `1` to skip starting the background Modbus polling threads (useful for local dev/tests without hardware) |
+| Variable | Purpose |
+|---|---|
+| `DB_SERVER`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | SQL Server connection |
+| `MODBUS_HOST`, `MODBUS_PORT` | Modbus TCP gateway |
+| `DISABLE_WORKERS` | Set to `1` to skip starting the background Modbus polling threads (useful for local dev/tests without hardware) |
 
 ---
 

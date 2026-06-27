@@ -21,10 +21,17 @@ from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.charts.legends import Legend
+from datetime import datetime
+from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.charts.legends import Legend
+from reportlab.lib import colors
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -37,15 +44,16 @@ app = Flask(__name__, static_folder=None)
 # =========================================================
 # GLOBALS
 # =========================================================
-ALL_GAUGES  = list(range(1, 65))
+ALL_GAUGES = list(range(1, 65))
 FIXTURE_CACHE = []
-MODBUS_CACHE  = {}
-REPORT_CACHE  = TTLCache(maxsize=200, ttl=30)
-LOCK          = threading.Lock()
+MODBUS_CACHE = {}
+REPORT_CACHE = TTLCache(maxsize=200, ttl=30)
+LOCK = threading.Lock()
 
 # Per-client SSE queues (one queue per connected browser tab)
 SSE_QUEUES = []
-SSE_LOCK   = threading.Lock()
+SSE_LOCK = threading.Lock()
+
 
 # =========================================================
 # DB AUTO-HEAL DECORATOR
@@ -60,7 +68,9 @@ def db_safe(fn):
                 logger.warning("[DB RETRY] %s: %s", fn.__name__, e)
                 time.sleep(0.5)
         return jsonify({"error": "Database unavailable"}), 500
+
     return wrapper
+
 
 # =========================================================
 # UI ROUTES — serve the built React app (client/dist) in production.
@@ -79,11 +89,17 @@ def serve_react_app(path=""):
     if os.path.exists(index_path):
         return send_from_directory(CLIENT_DIST, "index.html")
 
-    return jsonify({
-        "error": "Frontend build not found",
-        "hint": "Run `npm run build` inside client/, or use `npm run dev` "
-                "in client/ for local development (http://localhost:5173)."
-    }), 404
+    return (
+        jsonify(
+            {
+                "error": "Frontend build not found",
+                "hint": "Run `npm run build` inside client/, or use `npm run dev` "
+                "in client/ for local development (http://localhost:5173).",
+            }
+        ),
+        404,
+    )
+
 
 # =========================================================
 # HEALTH CHECK
@@ -91,15 +107,18 @@ def serve_react_app(path=""):
 @app.route("/api/health")
 def health():
     with LOCK:
-        active  = sum(1 for v in MODBUS_CACHE.values() if v is not None)
-        polled  = len(MODBUS_CACHE)
-    return jsonify({
-        "status": "ok",
-        "gateway": f"{MODBUS['HOST']}:{MODBUS['PORT']}",
-        "gauges_responding": active,
-        "gauges_polled": polled,
-        "timestamp": datetime.now().isoformat()
-    })
+        active = sum(1 for v in MODBUS_CACHE.values() if v is not None)
+        polled = len(MODBUS_CACHE)
+    return jsonify(
+        {
+            "status": "ok",
+            "gateway": f"{MODBUS['HOST']}:{MODBUS['PORT']}",
+            "gauges_responding": active,
+            "gauges_polled": polled,
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
+
 
 # =========================================================
 # TODAY'S STATS
@@ -108,7 +127,7 @@ def health():
 @db_safe
 def today_stats():
     conn = get_connection()
-    cur  = conn.cursor()
+    cur = conn.cursor()
     cur.execute("""
         SELECT
             COUNT(*)                                                        AS total,
@@ -122,15 +141,21 @@ def today_stats():
     conn.close()
 
     total, pass_c, fail_c, running = (
-        row[0] or 0, row[1] or 0, row[2] or 0, row[3] or 0
+        row[0] or 0,
+        row[1] or 0,
+        row[2] or 0,
+        row[3] or 0,
     )
-    return jsonify({
-        "total":     total,
-        "pass":      pass_c,
-        "fail":      fail_c,
-        "running":   running,
-        "pass_rate": round(pass_c / total * 100, 1) if total > 0 else 0.0
-    })
+    return jsonify(
+        {
+            "total": total,
+            "pass": pass_c,
+            "fail": fail_c,
+            "running": running,
+            "pass_rate": round(pass_c / total * 100, 1) if total > 0 else 0.0,
+        }
+    )
+
 
 # =========================================================
 # RECIPE VALIDATION (returns LL/UL for frontend chart)
@@ -139,23 +164,29 @@ def today_stats():
 @db_safe
 def get_recipe_api(model_code):
     conn = get_connection()
-    cur  = conn.cursor()
-    cur.execute("""
+    cur = conn.cursor()
+    cur.execute(
+        """
         SELECT model_name, lower_limit, upper_limit
         FROM pirani_recipe_master
         WHERE model_code = ?
-    """, (model_code,))
+    """,
+        (model_code,),
+    )
     row = cur.fetchone()
     conn.close()
 
     if not row:
         return jsonify({"exists": False, "model_name": None, "ll": None, "ul": None})
-    return jsonify({
-        "exists":     True,
-        "model_name": row[0],
-        "ll":  float(row[1]) if row[1] is not None else None,
-        "ul":  float(row[2]) if row[2] is not None else None,
-    })
+    return jsonify(
+        {
+            "exists": True,
+            "model_name": row[0],
+            "ll": float(row[1]) if row[1] is not None else None,
+            "ul": float(row[2]) if row[2] is not None else None,
+        }
+    )
+
 
 # =========================================================
 # RECIPE MASTER API
@@ -164,15 +195,15 @@ def get_recipe_api(model_code):
 @db_safe
 def recipe_master():
     conn = get_connection()
-    cur  = conn.cursor()
+    cur = conn.cursor()
 
     if request.method == "POST":
         d = request.json or {}
         try:
-            ll       = float(d["ll"])
-            ul       = float(d["ul"])
+            ll = float(d["ll"])
+            ul = float(d["ul"])
             duration = int(d["duration"])
-            poll     = int(d["poll"])
+            poll = int(d["poll"])
         except (KeyError, ValueError, TypeError) as e:
             conn.close()
             return jsonify({"error": f"Invalid data: {e}"}), 400
@@ -181,7 +212,8 @@ def recipe_master():
             conn.close()
             return jsonify({"error": "Lower limit must be less than upper limit"}), 400
 
-        cur.execute("""
+        cur.execute(
+            """
             MERGE pirani_recipe_master AS target
             USING (SELECT ? AS model_code, ? AS model_name, ? AS lower_limit,
                           ? AS upper_limit, ? AS test_duration_min, ? AS poll_interval_sec)
@@ -197,7 +229,9 @@ def recipe_master():
                         test_duration_min, poll_interval_sec)
                 VALUES (source.model_code, source.model_name, source.lower_limit,
                         source.upper_limit, source.test_duration_min, source.poll_interval_sec);
-        """, (d["model"], d.get("model_name", ""), ll, ul, duration, poll))
+        """,
+            (d["model"], d.get("model_name", ""), ll, ul, duration, poll),
+        )
         conn.commit()
 
     cur.execute("""
@@ -216,11 +250,12 @@ def recipe_master():
 @db_safe
 def delete_recipe(model_code):
     conn = get_connection()
-    cur  = conn.cursor()
+    cur = conn.cursor()
     cur.execute("DELETE FROM pirani_recipe_master WHERE model_code = ?", (model_code,))
     conn.commit()
     conn.close()
     return jsonify({"success": True})
+
 
 # =========================================================
 # START TEST
@@ -229,9 +264,9 @@ def delete_recipe(model_code):
 def start_test():
     d = request.json or {}
 
-    serial_no  = d.get("serial_no",  "").strip()
+    serial_no = d.get("serial_no", "").strip()
     model_code = d.get("model_code", "").strip()
-    line_name  = d.get("line", "")
+    line_name = d.get("line", "")
 
     try:
         gauge_id = int(d.get("gauge_id", 0))
@@ -239,18 +274,29 @@ def start_test():
         return jsonify({"status": "ERROR", "message": "Invalid gauge ID"}), 400
 
     if not serial_no or not model_code:
-        return jsonify({"status": "ERROR", "message": "Serial number and model code required"}), 400
+        return (
+            jsonify(
+                {"status": "ERROR", "message": "Serial number and model code required"}
+            ),
+            400,
+        )
 
     if not 1 <= gauge_id <= 64:
-        return jsonify({"status": "ERROR", "message": "Gauge ID must be between 1 and 64"}), 400
+        return (
+            jsonify(
+                {"status": "ERROR", "message": "Gauge ID must be between 1 and 64"}
+            ),
+            400,
+        )
 
     result = run_test(
         serial_no=serial_no,
         model_code=model_code,
         line_name=line_name,
-        slave_id=gauge_id
+        slave_id=gauge_id,
     )
     return jsonify(result)
+
 
 # =========================================================
 # STOP TEST
@@ -258,19 +304,29 @@ def start_test():
 @app.route("/stop-test/<int:gauge_id>", methods=["POST"])
 def stop_test_route(gauge_id):
     if not 1 <= gauge_id <= 64:
-        return jsonify({"status": "ERROR", "message": "Gauge ID must be between 1 and 64"}), 400
+        return (
+            jsonify(
+                {"status": "ERROR", "message": "Gauge ID must be between 1 and 64"}
+            ),
+            400,
+        )
     if stop_test(gauge_id):
-        return jsonify({"status": "STOPPED", "message": f"Stop signal sent to Gauge {gauge_id}"})
-    return jsonify({"status": "NOT_RUNNING", "message": f"No active test on Gauge {gauge_id}"}), 404
+        return jsonify(
+            {"status": "STOPPED", "message": f"Stop signal sent to Gauge {gauge_id}"}
+        )
+    return (
+        jsonify(
+            {"status": "NOT_RUNNING", "message": f"No active test on Gauge {gauge_id}"}
+        ),
+        404,
+    )
 
 
 @app.route("/api/active-tests")
 def active_tests_api():
     gauges = get_active_tests()
-    return jsonify({
-        "active_gauges": gauges,
-        "count": len(gauges)
-    })
+    return jsonify({"active_gauges": gauges, "count": len(gauges)})
+
 
 # =========================================================
 # FIXTURE BACKGROUND WORKER
@@ -282,18 +338,18 @@ def _broadcast_fixtures(data):
             try:
                 q.put_nowait(data)
             except queue.Full:
-                pass   # Slow client — drop this update
+                pass  # Slow client — drop this update
 
 
 def fixture_worker():
     conn = None
-    cur  = None
+    cur = None
 
     while True:
         try:
             if conn is None:
                 conn = get_connection()
-                cur  = conn.cursor()
+                cur = conn.cursor()
 
             cur.execute("""
                 SELECT
@@ -315,17 +371,22 @@ def fixture_worker():
                 )
             """)
 
-            rows   = cur.fetchall()
+            rows = cur.fetchall()
             latest = {r[0]: (r[1], r[2], r[3], r[4]) for r in rows}
             fixtures = []
 
             for gid in ALL_GAUGES:
                 if gid not in latest:
-                    fixtures.append({
-                        "slave_id": gid, "status": "IDLE",
-                        "color": "gray", "remaining": None,
-                        "line": None, "serial_no": None
-                    })
+                    fixtures.append(
+                        {
+                            "slave_id": gid,
+                            "status": "IDLE",
+                            "color": "gray",
+                            "remaining": None,
+                            "line": None,
+                            "serial_no": None,
+                        }
+                    )
                     continue
 
                 serial, result, line, remaining = latest[gid]
@@ -346,11 +407,16 @@ def fixture_worker():
                     status, color = ("ERROR", "orange")
                     remaining = None
 
-                fixtures.append({
-                    "slave_id": gid, "status": status,
-                    "color": color, "remaining": remaining,
-                    "line": line, "serial_no": serial
-                })
+                fixtures.append(
+                    {
+                        "slave_id": gid,
+                        "status": status,
+                        "color": color,
+                        "remaining": remaining,
+                        "line": line,
+                        "serial_no": serial,
+                    }
+                )
 
             with LOCK:
                 FIXTURE_CACHE[:] = fixtures
@@ -365,7 +431,7 @@ def fixture_worker():
             except Exception:
                 pass
             conn = None
-            cur  = None
+            cur = None
             time.sleep(2)
 
         time.sleep(2)
@@ -373,6 +439,7 @@ def fixture_worker():
 
 if "pytest" not in sys.modules and os.environ.get("DISABLE_WORKERS", "0") != "1":
     threading.Thread(target=fixture_worker, daemon=True).start()
+
 
 # =========================================================
 # FIXTURES REST API
@@ -404,7 +471,7 @@ def fixtures_stream():
                     data = client_q.get(timeout=30)
                     yield f"data: {json.dumps(data)}\n\n"
                 except queue.Empty:
-                    yield ": keepalive\n\n"   # Prevent proxy timeout
+                    yield ": keepalive\n\n"  # Prevent proxy timeout
         except GeneratorExit:
             pass
         finally:
@@ -415,8 +482,9 @@ def fixtures_stream():
     return Response(
         stream(),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
 
 # =========================================================
 # MODBUS POLLING WORKER
@@ -439,9 +507,7 @@ def modbus_worker():
 
             for sid in ALL_GAUGES:
                 try:
-                    rr = client.read_holding_registers(
-                        address=3, count=2, unit=sid
-                    )
+                    rr = client.read_holding_registers(address=3, count=2, unit=sid)
                     with LOCK:
                         if rr and not rr.isError():
                             value = rr.registers[1] / 1000
@@ -469,6 +535,7 @@ def modbus_worker():
 if "pytest" not in sys.modules and os.environ.get("DISABLE_WORKERS", "0") != "1":
     threading.Thread(target=modbus_worker, daemon=True).start()
 
+
 # =========================================================
 # LIVE VACUUM API
 # =========================================================
@@ -480,6 +547,7 @@ def get_live_vacuum(slave_id):
         vacuum = None
     return jsonify({"vacuum": vacuum})
 
+
 # =========================================================
 # FIXTURE DETAIL API (extended)
 # =========================================================
@@ -487,8 +555,9 @@ def get_live_vacuum(slave_id):
 @db_safe
 def fixture_detail(slave_id):
     conn = get_connection()
-    cur  = conn.cursor()
-    cur.execute("""
+    cur = conn.cursor()
+    cur.execute(
+        """
         SELECT TOP 1
             h.gauge_id,
             h.serial_no,
@@ -504,30 +573,43 @@ def fixture_detail(slave_id):
         LEFT JOIN pirani_recipe_master r ON h.model_code = r.model_code
         WHERE h.gauge_id = ?
         ORDER BY h.start_time DESC
-    """, (slave_id,))
+    """,
+        (slave_id,),
+    )
     row = cur.fetchone()
     conn.close()
 
     if not row:
-        return jsonify({
-            "gauge_id": slave_id, "serial_no": None,
-            "model_code": None, "model_name": None,
-            "line_name": None, "final_result": None,
-            "start_time": None, "ll": None, "ul": None, "duration_min": None
-        })
+        return jsonify(
+            {
+                "gauge_id": slave_id,
+                "serial_no": None,
+                "model_code": None,
+                "model_name": None,
+                "line_name": None,
+                "final_result": None,
+                "start_time": None,
+                "ll": None,
+                "ul": None,
+                "duration_min": None,
+            }
+        )
 
-    return jsonify({
-        "gauge_id":    row[0],
-        "serial_no":   row[1],
-        "model_code":  row[2],
-        "model_name":  row[3],
-        "line_name":   row[4],
-        "final_result": row[5],
-        "start_time":  str(row[6]) if row[6] else None,
-        "ll":          float(row[7]) if row[7] is not None else None,
-        "ul":          float(row[8]) if row[8] is not None else None,
-        "duration_min": int(row[9]) if row[9] is not None else None,
-    })
+    return jsonify(
+        {
+            "gauge_id": row[0],
+            "serial_no": row[1],
+            "model_code": row[2],
+            "model_name": row[3],
+            "line_name": row[4],
+            "final_result": row[5],
+            "start_time": str(row[6]) if row[6] else None,
+            "ll": float(row[7]) if row[7] is not None else None,
+            "ul": float(row[8]) if row[8] is not None else None,
+            "duration_min": int(row[9]) if row[9] is not None else None,
+        }
+    )
+
 
 # =========================================================
 # MODBUS DIAGNOSTICS
@@ -535,18 +617,20 @@ def fixture_detail(slave_id):
 @app.route("/api/modbus/diagnostics")
 def modbus_diagnostics():
     with LOCK:
-        active   = sum(1 for v in MODBUS_CACHE.values() if v is not None)
+        active = sum(1 for v in MODBUS_CACHE.values() if v is not None)
         snapshot = dict(MODBUS_CACHE)
-    return jsonify({
-        "gateway_ip":        MODBUS["HOST"],
-        "port":              MODBUS["PORT"],
-        "gauges_polled":     len(snapshot),
-        "gauges_responding": active,
-        "readings": {
-            k: round(v, 3) if v is not None else None
-            for k, v in snapshot.items()
+    return jsonify(
+        {
+            "gateway_ip": MODBUS["HOST"],
+            "port": MODBUS["PORT"],
+            "gauges_polled": len(snapshot),
+            "gauges_responding": active,
+            "readings": {
+                k: round(v, 3) if v is not None else None for k, v in snapshot.items()
+            },
         }
-    })
+    )
+
 
 # =========================================================
 # REPORTS API
@@ -558,13 +642,13 @@ def reports_api():
     if cache_key in REPORT_CACHE and request.args.get("export") != "excel":
         return jsonify(REPORT_CACHE[cache_key])
 
-    limit  = request.args.get("limit",  type=int)
-    start  = request.args.get("start")
-    end    = request.args.get("end")
-    model  = request.args.get("model")
+    limit = request.args.get("limit", type=int)
+    start = request.args.get("start")
+    end = request.args.get("end")
+    model = request.args.get("model")
     result = request.args.get("result")
-    line   = request.args.get("line")
-    gauge  = request.args.get("gauge",  type=int)
+    line = request.args.get("line")
+    gauge = request.args.get("gauge", type=int)
 
     base_query = """
         SELECT
@@ -577,7 +661,9 @@ def reports_api():
             h.final_result,
             h.start_time,
             h.end_time,
-            l.vacuum AS last_vacuum
+            l.vacuum AS last_vacuum,
+            rm.lower_limit AS ll,
+            rm.upper_limit AS ul
         FROM pirani_test_header h
         OUTER APPLY (
             SELECT TOP 1 vacuum
@@ -585,14 +671,14 @@ def reports_api():
             WHERE test_id = h.test_id
             ORDER BY log_time DESC
         ) l
+        LEFT JOIN pirani_recipe_master rm ON rm.model_code = h.model_code
     """
     params = []
 
     if limit:
         query = (
-            base_query
-            + " ORDER BY h.start_time DESC "
-              "OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"
+            base_query + " ORDER BY h.start_time DESC "
+            "OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"
         )
         params.append(limit)
     else:
@@ -619,7 +705,7 @@ def reports_api():
         query += " ORDER BY h.start_time DESC"
 
     conn = get_connection()
-    df   = pd.read_sql(query, conn, params=params)
+    df = pd.read_sql(query, conn, params=params)
     conn.close()
 
     if "test_id" in df.columns:
@@ -648,11 +734,14 @@ def reports_api():
         out.seek(0)
         fname = f"pirani_report_{start or 'all'}.xlsx"
         return send_file(
-            out, as_attachment=True, download_name=fname,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            out,
+            as_attachment=True,
+            download_name=fname,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
     return jsonify(data)
+
 
 # =========================================================
 # REPORT TREND API  (UUID-safe — was incorrectly int:)
@@ -661,67 +750,256 @@ def reports_api():
 @db_safe
 def report_trend(test_id):
     conn = get_connection()
-    cur  = conn.cursor()
-    cur.execute("""
+    cur = conn.cursor()
+    cur.execute(
+        """
         SELECT log_time, vacuum, result
         FROM pirani_test_log
         WHERE test_id = ?
         ORDER BY log_time
-    """, (test_id,))
+    """,
+        (test_id,),
+    )
     rows = cur.fetchall()
     conn.close()
 
-    return jsonify([
-        {
-            "time":   str(r[0]),
-            "vacuum": float(r[1]) if r[1] is not None else None,
-            "result": r[2]
-        }
-        for r in rows
-    ])
+    return jsonify(
+        [
+            {
+                "time": str(r[0]),
+                "vacuum": float(r[1]) if r[1] is not None else None,
+                "result": r[2],
+            }
+            for r in rows
+        ]
+    )
+
 
 # =========================================================
 # REPORT PDF EXPORT  (single test: header info + every poll reading)
 # =========================================================
+def _trend_chart_drawing(readings, ll, ul, width=480, height=190):
+    """Vacuum Trend Chart
+    X-axis : Time (min)
+    Y-axis : Vacuum (mbar)
+    Blue   : Actual Vacuum
+    Green  : Lower Limit
+    Red    : Upper Limit
+    """
+
+    if len(readings) < 2:
+        return None
+
+    # -----------------------------
+    # Convert timestamps to elapsed minutes
+    # -----------------------------
+    try:
+        start = datetime.fromisoformat(str(readings[0][0]))
+    except Exception:
+        start = None
+
+    x_labels = []
+    values = []
+
+    for r in readings:
+        if r[1] is None:
+            continue
+
+        values.append(float(r[1]))
+
+        if start:
+            try:
+                t = datetime.fromisoformat(str(r[0]))
+                mins = (t - start).total_seconds() / 60.0
+                x_labels.append(f"{mins:.1f}")
+            except Exception:
+                x_labels.append(str(len(x_labels)))
+        else:
+            x_labels.append(str(len(x_labels)))
+
+    n = len(values)
+
+    if n < 2:
+        return None
+
+    # -----------------------------
+    # Axis limits
+    # -----------------------------
+    bounds = values.copy()
+
+    if ll is not None:
+        bounds.append(float(ll))
+
+    if ul is not None:
+        bounds.append(float(ul))
+
+    pad = (max(bounds) - min(bounds)) * 0.15 or 0.05
+
+    y_min = min(bounds) - pad
+    y_max = max(bounds) + pad
+
+    drawing = Drawing(width, height)
+
+    chart = HorizontalLineChart()
+    chart.x = 55
+    chart.y = 40
+    chart.width = width - 80
+    chart.height = height - 70
+
+    chart.valueAxis.valueMin = y_min
+    chart.valueAxis.valueMax = y_max
+    chart.valueAxis.labelTextFormat = "%.3f"
+
+    chart.valueAxis.labels.fontSize = 7
+    chart.categoryAxis.labels.fontSize = 7
+
+    # Show only every few labels
+    step = max(1, n // 8)
+
+    chart.categoryAxis.categoryNames = [
+        x_labels[i] if i % step == 0 else "" for i in range(n)
+    ]
+
+    # -----------------------------
+    # Data series
+    # -----------------------------
+    chart.data = [
+        values,  # Blue
+        [float(ll)] * n if ll is not None else [],
+        [float(ul)] * n if ul is not None else [],
+    ]
+
+    # Vacuum
+    chart.lines[0].strokeColor = colors.blue
+    chart.lines[0].strokeWidth = 2
+    chart.lines[0].symbol = None
+
+    idx = 1
+
+    # Lower Limit
+    if ll is not None:
+        chart.lines[idx].strokeColor = colors.green
+        chart.lines[idx].strokeWidth = 1.5
+        chart.lines[idx].strokeDashArray = (4, 2)
+        chart.lines[idx].symbol = None
+        idx += 1
+
+    # Upper Limit
+    if ul is not None:
+        chart.lines[idx].strokeColor = colors.red
+        chart.lines[idx].strokeWidth = 1.5
+        chart.lines[idx].strokeDashArray = (4, 2)
+        chart.lines[idx].symbol = None
+
+    drawing.add(chart)
+
+    # -----------------------------
+    # Axis Titles
+    # -----------------------------
+    drawing.add(
+        String(
+            width / 2,
+            8,
+            "Time (min)",
+            textAnchor="middle",
+            fontSize=8,
+        )
+    )
+
+    drawing.add(
+        String(
+            12,
+            height / 2,
+            "Vacuum (mbar)",
+            angle=90,
+            fontSize=8,
+        )
+    )
+
+    # -----------------------------
+    # Legend
+    # -----------------------------
+    legend = Legend()
+    legend.x = width - 90
+    legend.y = height - 10
+    legend.dx = 10
+    legend.dy = 10
+    legend.fontSize = 7
+
+    legend.colorNamePairs = [
+        (colors.blue, "Vacuum"),
+        (colors.green, "Lower Limit"),
+        (colors.red, "Upper Limit"),
+    ]
+
+    drawing.add(legend)
+
+    return drawing
+
+
 @app.route("/api/report/<string:test_id>/pdf")
 @db_safe
 def report_pdf(test_id):
     conn = get_connection()
-    cur  = conn.cursor()
+    cur = conn.cursor()
 
-    cur.execute("""
-        SELECT test_id, gauge_id, serial_no, model_code, model_name,
-               line_name, final_result, start_time, end_time
-        FROM pirani_test_header
-        WHERE test_id = ?
-    """, (test_id,))
+    cur.execute(
+        """
+        SELECT h.test_id, h.gauge_id, h.serial_no, h.model_code, h.model_name,
+               h.line_name, h.final_result, h.start_time, h.end_time,
+               rm.lower_limit AS ll, rm.upper_limit AS ul
+        FROM pirani_test_header h
+        LEFT JOIN pirani_recipe_master rm ON rm.model_code = h.model_code
+        WHERE h.test_id = ?
+    """,
+        (test_id,),
+    )
     header_row = cur.fetchone()
     if not header_row:
         conn.close()
         return jsonify({"error": "Test not found"}), 404
     header = dict(zip([c[0] for c in cur.description], header_row))
 
-    cur.execute("""
+    cur.execute(
+        """
         SELECT log_time, vacuum, result
         FROM pirani_test_log
         WHERE test_id = ?
         ORDER BY log_time
-    """, (test_id,))
+    """,
+        (test_id,),
+    )
     readings = cur.fetchall()
     conn.close()
 
     def fmt_dt(v):
         return str(v) if v else "—"
 
+    def fmt_num(v):
+        return f"{float(v):.3f}" if v is not None else "—"
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        topMargin=18 * mm, bottomMargin=16 * mm, leftMargin=16 * mm, rightMargin=16 * mm
+        buf,
+        pagesize=A4,
+        topMargin=18 * mm,
+        bottomMargin=16 * mm,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
     )
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("ReportTitle", parent=styles["Title"], fontSize=16, spaceAfter=4)
-    sub_style = ParagraphStyle("ReportSub", parent=styles["Normal"], textColor=colors.HexColor("#64748b"), fontSize=9)
-    h2_style = ParagraphStyle("ReportH2", parent=styles["Heading2"], fontSize=12, spaceBefore=2, spaceAfter=6)
+    title_style = ParagraphStyle(
+        "ReportTitle", parent=styles["Title"], fontSize=16, spaceAfter=4
+    )
+    sub_style = ParagraphStyle(
+        "ReportSub",
+        parent=styles["Normal"],
+        textColor=colors.HexColor("#64748b"),
+        fontSize=9,
+    )
+    h2_style = ParagraphStyle(
+        "ReportH2", parent=styles["Heading2"], fontSize=12, spaceBefore=2, spaceAfter=6
+    )
 
     elements = [
         Paragraph("Pirani Gauge Test Report", title_style),
@@ -730,24 +1008,54 @@ def report_pdf(test_id):
     ]
 
     info_rows = [
-        ["Gauge",      str(header.get("gauge_id") or "—"), "Line",   header.get("line_name") or "—"],
-        ["Serial No.", header.get("serial_no") or "—",      "Model",  header.get("model_code") or "—"],
-        ["Model Name", header.get("model_name") or "—",     "Result", header.get("final_result") or "—"],
-        ["Start Time", fmt_dt(header.get("start_time")),    "End Time", fmt_dt(header.get("end_time"))],
+        [
+            "Gauge",
+            str(header.get("gauge_id") or "—"),
+            "Line",
+            header.get("line_name") or "—",
+        ],
+        [
+            "Serial No.",
+            header.get("serial_no") or "—",
+            "Model",
+            header.get("model_code") or "—",
+        ],
+        [
+            "Model Name",
+            header.get("model_name") or "—",
+            "Result",
+            header.get("final_result") or "—",
+        ],
+        [
+            "Start Time",
+            fmt_dt(header.get("start_time")),
+            "End Time",
+            fmt_dt(header.get("end_time")),
+        ],
+        [
+            "Lower Limit",
+            fmt_num(header.get("ll")),
+            "Upper Limit",
+            fmt_num(header.get("ul")),
+        ],
     ]
     info_table = Table(info_rows, colWidths=[28 * mm, 55 * mm, 28 * mm, 55 * mm])
-    info_table.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#64748b")),
-        ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#64748b")),
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
-        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f8fafc")),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
+    info_table.setStyle(
+        TableStyle(
+            [
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#64748b")),
+                ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#64748b")),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+                ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f8fafc")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
     elements += [info_table, Spacer(1, 14)]
 
     vacs = [float(r[1]) for r in readings if r[1] is not None]
@@ -755,55 +1063,100 @@ def report_pdf(test_id):
         stats_table = Table(
             [
                 ["Min (mbar)", "Max (mbar)", "Avg (mbar)", "Readings"],
-                [f"{min(vacs):.3f}", f"{max(vacs):.3f}", f"{(sum(vacs) / len(vacs)):.3f}", str(len(vacs))],
+                [
+                    f"{min(vacs):.3f}",
+                    f"{max(vacs):.3f}",
+                    f"{(sum(vacs) / len(vacs)):.3f}",
+                    str(len(vacs)),
+                ],
             ],
             colWidths=[41.5 * mm] * 4,
         )
-        stats_table.setStyle(TableStyle([
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
+        stats_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
         elements += [stats_table, Spacer(1, 14)]
+
+    chart_drawing = _trend_chart_drawing(readings, header.get("ll"), header.get("ul"))
+    if chart_drawing:
+        elements.append(Paragraph("Vacuum Trend", h2_style))
+        elements.append(chart_drawing)
+        elements.append(Spacer(1, 14))
 
     elements.append(Paragraph("Readings Log", h2_style))
 
-    table_data = [["#", "Time", "Vacuum (mbar)", "Result"]]
-    for i, r in enumerate(readings, start=1):
-        table_data.append([
-            str(i),
-            str(r[0]),
-            f"{float(r[1]):.3f}" if r[1] is not None else "—",
-            r[2] or "—",
-        ])
-    if len(table_data) == 1:
-        table_data.append(["—", "No readings recorded", "", ""])
+    table_data = [["#", "Time", "LL (mbar)", "Vacuum (mbar)", "UL (mbar)", "Result"]]
 
-    readings_table = Table(table_data, colWidths=[12 * mm, 55 * mm, 35 * mm, 25 * mm], repeatRows=1)
-    readings_table.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    for i, r in enumerate(readings, start=1):
+        table_data.append(
+            [
+                str(i),
+                str(r[0]),
+                fmt_num(header.get("ll")),
+                f"{float(r[1]):.3f}" if r[1] is not None else "—",
+                fmt_num(header.get("ul")),
+                r[2] or "—",
+            ]
+        )
+
+    if len(table_data) == 1:
+        table_data.append(["—", "No readings recorded", "", "", "", ""])
+
+    readings_table = Table(
+        table_data,
+        colWidths=[
+            10 * mm,  # #
+            45 * mm,  # Time
+            20 * mm,  # LL
+            28 * mm,  # Vacuum
+            20 * mm,  # UL
+            22 * mm,  # Result
+        ],
+        repeatRows=1,
+    )
+
+    readings_table.setStyle(
+        TableStyle(
+            [
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, colors.HexColor("#f8fafc")],
+                ),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
     elements.append(readings_table)
 
     doc.build(elements)
     buf.seek(0)
 
     return send_file(
-        buf, mimetype="application/pdf", as_attachment=True,
-        download_name=f"pirani_report_{test_id}.pdf"
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"pirani_report_{test_id}.pdf",
     )
+
 
 # =========================================================
 # APP START

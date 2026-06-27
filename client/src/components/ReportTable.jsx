@@ -29,7 +29,7 @@ const RESULT_BADGE = {
 const DEFAULT_BADGE =
   "bg-signal-err/10 text-signal-err ring-1 ring-inset ring-signal-err/30";
 
-const COLUMN_COUNT = 11;
+const COLUMN_COUNT = 13;
 
 export default function ReportTable({
   rows,
@@ -61,7 +61,9 @@ export default function ReportTable({
               <th className="px-3 py-2.5 text-left">Model Name</th>
               <th className="px-3 py-2.5">Line</th>
               <th className="px-3 py-2.5">Duration</th>
+              <th className="px-3 py-2.5">LL (mbar)</th>
               <th className="px-3 py-2.5">Last Vac.</th>
+              <th className="px-3 py-2.5">UL (mbar)</th>
               <th className="px-3 py-2.5">Result</th>
               <th className="px-3 py-2.5">PDF</th>
             </tr>
@@ -97,7 +99,6 @@ export default function ReportTable({
                     : "—";
                 const isOpen = expandedId === r.test_id;
                 const zebra = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
-
                 return (
                   <Fragment key={r.test_id}>
                     <tr
@@ -139,8 +140,14 @@ export default function ReportTable({
                       <td className="px-3 py-2 text-center text-slate-500 tabular">
                         {fmtDuration(r.start_time, r.end_time)}
                       </td>
+                      <td className="px-3 py-2 text-center font-mono tabular text-slate-500">
+                        {r.ll != null ? Number(r.ll).toFixed(3) : "—"}
+                      </td>
                       <td className="px-3 py-2 text-center font-mono tabular text-slate-700">
                         {lastVac}
+                      </td>
+                      <td className="px-3 py-2 text-center font-mono tabular text-slate-500">
+                        {r.ul != null ? Number(r.ul).toFixed(3) : "—"}
                       </td>
                       <td className="px-3 py-2 text-center">
                         <span

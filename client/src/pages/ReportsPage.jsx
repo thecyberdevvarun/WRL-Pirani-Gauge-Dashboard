@@ -85,8 +85,14 @@ export default function ReportsPage() {
         loading={loading}
         error={error}
         expandedId={expandedId}
-        onToggleExpand={(testId) => setExpandedId((cur) => (cur === testId ? null : testId))}
-        emptyMessage={hasSearched ? "No records found" : "Select a date range and click Search"}
+        onToggleExpand={(testId) =>
+          setExpandedId((cur) => (cur === testId ? null : testId))
+        }
+        emptyMessage={
+          hasSearched
+            ? "No records found"
+            : "Select a date range and click Search"
+        }
       />
     </main>
   );
