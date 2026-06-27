@@ -5,6 +5,36 @@ A real-time production-floor dashboard for testing and monitoring **Pirani vacuu
 Operators start a test on a fixture, the backend polls the gauge over Modbus TCP at a configurable interval, results are logged to SQL Server, and engineers can pull pass/fail reports — complete with every individual reading and a one-click PDF export — without ever touching the floor PC.
 
 ---
+## 📸 Application Screenshots
+
+<table align="center">
+  <tr>
+    <td align="center">
+      <strong>Live Floor Monitoring</strong><br><br>
+        <img src="https://github.com/user-attachments/assets/a2010ecf-bba8-4444-a44d-d3eb3e8d2730"
+           alt="Reports"
+           width="500"
+           height="280"/>
+    </td>
+    <td align="center">
+      <strong>Recipe Management</strong><br><br>
+      <img src="https://github.com/user-attachments/assets/2664b341-daee-46c9-8fea-a2f3a5de6466"
+           alt="Recipes"
+           width="500"
+           height="280"/>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <br>
+      <strong>Reports Dashboard</strong><br><br>
+      <img src="https://github.com/user-attachments/assets/42174b56-111b-42d2-b410-93f211e908fb"
+           alt="Live Floor"
+           width="800"
+           height="450"/>
+    </td>
+  </tr>
+</table>
 
 ## ✨ Features
 
