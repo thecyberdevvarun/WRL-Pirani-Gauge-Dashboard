@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { FiPlay } from "react-icons/fi";
-import { getRecipeByModel, startTest as startTestApi } from "../api/client";
+import { getMaterialByCode, startTest as startTestApi } from "../api/client";
 import { toast } from "react-hot-toast";
-import { getLineConfig } from "../config/lines";
 
 function extractModelCode(serial) {
   return serial.substring(2, 6);
@@ -21,18 +20,42 @@ function validateSerial(serial) {
 
 export default function ScanPanel({
   gaugeId,
-  gaugeCount,
+  gaugeIds,
+  lineLabel,
   onGaugeIdChange,
   onStarted,
 }) {
   const line = useSelector((s) => s.auth.line);
-  const lineConfig = getLineConfig(line);
-  const maxGauge = gaugeCount || lineConfig?.gaugeCount || 0;
 
   const [serial, setSerial] = useState("");
   const [modelCode, setModelCode] = useState("");
   const [modelName, setModelName] = useState("");
   const [starting, setStarting] = useState(false);
+  const serialRef = useRef(null);
+  const gaugeRef = useRef(null);
+
+  useEffect(() => {
+    serialRef.current?.focus();
+  }, []);
+
+  const handleSerialChange = (e) => {
+    const v = e.target.value;
+    setSerial(v);
+    // Scanners type the full serial instantly — jump on to Gauge ID once it is complete.
+    if (validateSerial(v.trim()).ok) gaugeRef.current?.focus();
+  };
+
+  const handleSerialKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    gaugeRef.current?.focus();
+  };
+
+  const handleGaugeKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!starting) handleStart();
+  };
 
   const handleSerialBlur = async () => {
     const s = serial.trim();
@@ -41,10 +64,10 @@ export default function ScanPanel({
     const code = extractModelCode(s);
     setModelCode(code);
     try {
-      const recipe = await getRecipeByModel(code);
-      setModelName(recipe.exists ? recipe.model_name : "NOT DEFINED");
+      const material = await getMaterialByCode(code);
+      setModelName(material.exists ? material.name : "UNKNOWN MODEL");
     } catch {
-      setModelName("NOT DEFINED");
+      setModelName("UNKNOWN MODEL");
     }
   };
 
@@ -57,23 +80,16 @@ export default function ScanPanel({
     if (!serialNo) return toast.error("Serial number required");
     const v = validateSerial(serialNo);
     if (!v.ok) return toast.error(v.msg);
-    if (!gid || gid < 1 || gid > maxGauge)
-      return toast.error(`Enter a valid Gauge ID (1–${maxGauge})`);
+    if (!gid || !gaugeIds.includes(gid))
+      return toast.error("Enter a valid Gauge ID for this line");
 
     const code = extractModelCode(serialNo);
     setStarting(true);
     try {
-      const recipe = await getRecipeByModel(code);
-      if (!recipe.exists) {
-        setModelCode(code);
-        setModelName("NOT DEFINED");
-        toast("Recipe not found for this model", {
-          icon: <FiAlertTriangle />,
-        });
-        return;
-      }
+      // Display-only — a missing Material record no longer blocks starting a test.
+      const material = await getMaterialByCode(code).catch(() => ({ exists: false, name: null }));
       setModelCode(code);
-      setModelName(recipe.model_name);
+      setModelName(material.exists ? material.name : "UNKNOWN MODEL");
 
       const res = await startTestApi({
         serial_no: serialNo,
@@ -88,6 +104,7 @@ export default function ScanPanel({
         setModelCode("");
         setModelName("");
         onStarted?.();
+        serialRef.current?.focus();
       } else {
         toast.error(res.message || "Error starting test");
       }
@@ -106,15 +123,17 @@ export default function ScanPanel({
       <p className="text-xs text-slate-400 mb-4">
         Line:{" "}
         <span className="font-semibold text-slate-600">
-          {lineConfig?.label || "—"}
+          {lineLabel || "—"}
         </span>
-        {maxGauge ? ` · Gauges 1–${maxGauge}` : ""}
+        {gaugeIds.length ? ` · ${gaugeIds.length} gauges` : ""}
       </p>
 
       <label className="block text-xs mb-1 text-slate-500">Serial Number</label>
       <input
+        ref={serialRef}
         value={serial}
-        onChange={(e) => setSerial(e.target.value)}
+        onChange={handleSerialChange}
+        onKeyDown={handleSerialKeyDown}
         onBlur={handleSerialBlur}
         placeholder="Scan or type serial"
         className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
@@ -124,12 +143,12 @@ export default function ScanPanel({
         Gauge ID <span className="text-slate-400">(click fixture to fill)</span>
       </label>
       <input
+        ref={gaugeRef}
         type="number"
-        min={1}
-        max={maxGauge || undefined}
         value={gaugeId}
+        onKeyDown={handleGaugeKeyDown}
         onChange={(e) => onGaugeIdChange(e.target.value)}
-        placeholder={maxGauge ? `1 – ${maxGauge}` : "—"}
+        placeholder={gaugeIds.length ? "e.g. " + gaugeIds[0] : "—"}
         className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
       />
 

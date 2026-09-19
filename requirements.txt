@@ -5,4 +5,5 @@ pyodbc
 cachetools
 python-dotenv
 reportlab
+openpyxl
 pytest

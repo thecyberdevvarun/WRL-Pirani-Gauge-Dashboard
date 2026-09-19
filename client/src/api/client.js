@@ -28,16 +28,9 @@ async function request(url, options = {}) {
 export const getHealth = () => request("/api/health");
 export const getTodayStats = () => request("/api/stats/today");
 
-// ---- Recipes ----
-export const getRecipeByModel = (modelCode) =>
-  request(`/api/recipe/${encodeURIComponent(modelCode)}`);
-export const listRecipes = () => request("/api/recipes");
-export const saveRecipe = (payload) =>
-  request("/api/recipes", { method: "POST", body: JSON.stringify(payload) });
-export const deleteRecipe = (modelCode) =>
-  request(`/api/recipes/${encodeURIComponent(modelCode)}`, {
-    method: "DELETE",
-  });
+// ---- Material lookup (external system, display-only) ----
+export const getMaterialByCode = (modelCode) =>
+  request(`/api/material/${encodeURIComponent(modelCode)}`);
 
 // ---- Test control ----
 export const startTest = (payload) =>
@@ -52,6 +45,15 @@ export const getLiveVacuum = (slaveId) =>
   request(`/api/fixture-live/${slaveId}`);
 export const getFixtureDetail = (slaveId) => request(`/api/fixture/${slaveId}`);
 export const getModbusDiagnostics = () => request("/api/modbus/diagnostics");
+
+// ---- Line / gauge settings ----
+export const getLinesConfig = () => request("/api/settings/lines");
+export const saveLine = (payload) =>
+  request("/api/settings/lines", { method: "POST", body: JSON.stringify(payload) });
+export const deleteLine = (lineKey) =>
+  request(`/api/settings/lines/${encodeURIComponent(lineKey)}`, { method: "DELETE" });
+export const testConnection = (payload) =>
+  request("/api/settings/test-connection", { method: "POST", body: JSON.stringify(payload) });
 
 /** Opens the server-sent events stream of fixture state. Returns the EventSource. */
 export function openFixturesStream(onMessage, onError) {

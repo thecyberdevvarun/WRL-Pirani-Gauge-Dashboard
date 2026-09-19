@@ -11,6 +11,7 @@ venv/
 # Frontend
 client/node_modules/
 client/dist/
+client/package-lock.json
 
 # OS
 .DS_Store

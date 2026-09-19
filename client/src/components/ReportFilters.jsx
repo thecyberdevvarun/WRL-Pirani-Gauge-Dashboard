@@ -1,5 +1,6 @@
+import { useSelector } from "react-redux";
 import { FiSearch, FiDownload } from "react-icons/fi";
-import { LINES as LINE_CONFIG } from "../config/lines";
+import { selectLineOptions } from "../store/linesSlice";
 
 const QUICK_RANGES = [
   { label: "Today", days: 0 },
@@ -15,6 +16,7 @@ export default function ReportFilters({
   onExport,
   onQuickRange,
 }) {
+  const lineOptions = useSelector(selectLineOptions);
   const update = (key) => (e) =>
     setFilters((f) => ({ ...f, [key]: e.target.value }));
 
@@ -71,7 +73,7 @@ export default function ReportFilters({
             className="w-full px-3 py-2 border rounded text-sm"
           >
             <option value="">All Lines</option>
-            {LINE_CONFIG.map((l) => (
+            {lineOptions.map((l) => (
               <option key={l.key} value={l.key}>
                 {l.label}
               </option>

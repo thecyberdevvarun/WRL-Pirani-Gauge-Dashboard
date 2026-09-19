@@ -9,12 +9,12 @@ import DetailPanel from "../components/DetailPanel";
 import LastReportsTable from "../components/LastReportsTable";
 import { getFixtures, getReports, openFixturesStream } from "../api/client";
 import { toast } from "react-hot-toast";
-import { getLineConfig } from "../config/lines";
+import { selectGaugeIdsForLine, selectLineByKey } from "../store/linesSlice";
 
 export default function FixturesPage() {
   const line = useSelector((s) => s.auth.line);
-  const lineConfig = getLineConfig(line);
-  const gaugeCount = lineConfig?.gaugeCount ?? 0;
+  const lineConfig = useSelector((s) => selectLineByKey(s, line));
+  const gaugeIds = useSelector((s) => selectGaugeIdsForLine(s, line));
 
   const [fixtures, setFixtures] = useState([]);
   const [lastReports, setLastReports] = useState([]);
@@ -57,10 +57,11 @@ export default function FixturesPage() {
   }, [refreshLastReports]);
 
   // Only the gauges that belong to the currently selected line.
-  const lineFixtures = useMemo(
-    () => (gaugeCount ? fixtures.filter((f) => f.slave_id >= 1 && f.slave_id <= gaugeCount) : []),
-    [fixtures, gaugeCount]
-  );
+  const lineFixtures = useMemo(() => {
+    if (!gaugeIds.length) return [];
+    const idSet = new Set(gaugeIds);
+    return fixtures.filter((f) => idSet.has(f.slave_id));
+  }, [fixtures, gaugeIds]);
 
   const counts = useMemo(() => {
     const c = { pass: 0, fail: 0, run: 0, idle: 0 };
@@ -93,7 +94,8 @@ export default function FixturesPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_420px] gap-5 items-start">
           <ScanPanel
             gaugeId={gaugeId}
-            gaugeCount={gaugeCount}
+            gaugeIds={gaugeIds}
+            lineLabel={lineConfig?.line_label}
             onGaugeIdChange={setGaugeId}
             onStarted={() => {
               refreshFixtures();
@@ -103,8 +105,9 @@ export default function FixturesPage() {
 
           <ConveyorTrack
             fixtures={lineFixtures}
-            gaugeCount={gaugeCount}
-            lineLabel={lineConfig?.label}
+            gaugeIds={gaugeIds}
+            lineLabel={lineConfig?.line_label}
+            gap={lineConfig?.gap || 0}
             onSelect={handleSelect}
           />
 

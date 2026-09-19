@@ -4,13 +4,15 @@ import { useNavigate } from "react-router-dom";
 import { FiUser, FiShield, FiCheckCircle, FiLogIn, FiActivity } from "react-icons/fi";
 import toast from "react-hot-toast";
 import { CREDENTIALS } from "../config/credentials";
-import { LINES } from "../config/lines";
+import { selectLineOptions, selectLinesStatus } from "../store/linesSlice";
 import { login } from "../store/authSlice";
 
 export default function LoginPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const isAuthenticated = useSelector((s) => s.auth.isAuthenticated);
+  const lines = useSelector(selectLineOptions);
+  const linesStatus = useSelector(selectLinesStatus);
 
   const [selectedCred, setSelectedCred] = useState(null);
   const [selectedLine, setSelectedLine] = useState(null);
@@ -41,6 +43,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-ink-950 flex items-center justify-center p-6">
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-8">
         <div className="flex items-center gap-2.5 justify-center mb-1">
+          <img src="/western-logo.jpg" alt="Western Refrigeration" className="h-12 w-auto rounded-sm" />
           <span className="w-2.5 h-2.5 rounded-full bg-signal-pass shadow-[0_0_10px_2px_rgba(34,197,94,0.7)]" />
           <span className="font-display font-bold tracking-wide text-lg text-ink-900">
             PIRANI<span className="text-signal-pass"> GAUGE DASHBOARD</span>
@@ -84,8 +87,21 @@ export default function LoginPage() {
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
             <FiActivity /> 2. Select conveyor line
           </h3>
+          {linesStatus === "loading" && (
+            <p className="text-sm text-slate-400">Loading lines…</p>
+          )}
+          {linesStatus === "failed" && (
+            <p className="text-sm text-rose-500">
+              Could not load lines — check the server connection.
+            </p>
+          )}
+          {linesStatus === "succeeded" && lines.length === 0 && (
+            <p className="text-sm text-slate-400">
+              No lines configured yet — ask an admin to set one up in Settings.
+            </p>
+          )}
           <div className="grid grid-cols-3 gap-3">
-            {LINES.map((l) => {
+            {lines.map((l) => {
               const active = selectedLine?.key === l.key;
               return (
                 <button

@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   FiActivity,
-  FiList,
   FiBarChart2,
+  FiSettings,
   FiWifi,
   FiWifiOff,
   FiLogOut,
@@ -12,12 +12,12 @@ import {
 } from "react-icons/fi";
 import { getHealth } from "../api/client";
 import { logout } from "../store/authSlice";
-import { getLineConfig } from "../config/lines";
+import { selectLineByKey } from "../store/linesSlice";
 
 const NAV_ITEMS = [
   { to: "/", label: "Live Floor", icon: FiActivity },
-  { to: "/recipes", label: "Recipes", icon: FiList },
   { to: "/reports", label: "Reports", icon: FiBarChart2 },
+  { to: "/settings", label: "Settings", icon: FiSettings },
 ];
 
 export default function Layout() {
@@ -25,7 +25,7 @@ export default function Layout() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { username, role, line } = useSelector((s) => s.auth);
-  const lineConfig = getLineConfig(line);
+  const lineConfig = useSelector((s) => selectLineByKey(s, line));
 
   useEffect(() => {
     let mounted = true;
@@ -51,6 +51,7 @@ export default function Layout() {
       <header className="bg-ink-900 text-slate-200 sticky top-0 z-40 shadow-lg shadow-black/20">
         <div className="px-5 h-14 flex items-center gap-8 max-w-[1900px] mx-auto w-full">
           <div className="flex items-center gap-2.5">
+            <img src="/western-logo.jpg" alt="Western Refrigeration" className="h-9 w-auto rounded-sm" />
             <span className="w-2.5 h-2.5 rounded-full bg-signal-pass shadow-[0_0_10px_2px_rgba(34,197,94,0.7)]" />
             <span className="font-display font-bold tracking-wide text-[15px] text-white">
               PIRANI<span className="text-signal-pass"> GAUGE DASHBOARD</span>
@@ -95,7 +96,7 @@ export default function Layout() {
                 ({role})
               </span>
               <span className="text-slate-500">·</span>
-              <span>{lineConfig?.label || line || "No line"}</span>
+              <span>{lineConfig?.line_label || line || "No line"}</span>
             </span>
 
             <button

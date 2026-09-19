@@ -11,7 +11,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-import { getReportTrend, getRecipeByModel } from "../api/client";
+import { getReportTrend } from "../api/client";
 
 function fmtTime(dt) {
   const t = new Date(dt);
@@ -24,49 +24,35 @@ function fmtTime(dt) {
 /**
  * Expanded-row panel for ReportTable. Fetches every individual poll-interval
  * reading logged for this test (pirani_test_log, via /api/report/:id/trend)
- * plus the recipe limits, and shows a trend chart and the full readings list.
+ * and shows a trend chart and the full readings list. The Upper Limit
+ * (row.ul) is already on the row passed in from the reports list — it's the
+ * value snapshotted on pirani_test_header at test-start time, so no second
+ * fetch is needed here.
  */
 export default function ReportAccordion({ row }) {
-  const [state, setState] = useState({
-    loading: true,
-    error: null,
-    readings: [],
-    ll: null,
-    ul: null,
-  });
+  const [state, setState] = useState({ loading: true, error: null, readings: [] });
+  const ul = row.ul ?? null;
 
   useEffect(() => {
     let cancelled = false;
-    setState({ loading: true, error: null, readings: [], ll: null, ul: null });
+    setState({ loading: true, error: null, readings: [] });
 
-    Promise.all([getReportTrend(row.test_id), getRecipeByModel(row.model_code)])
-      .then(([trendData, recipe]) => {
+    getReportTrend(row.test_id)
+      .then((trendData) => {
         if (cancelled) return;
-        setState({
-          loading: false,
-          error: null,
-          readings: trendData,
-          ll: recipe.ll ?? null,
-          ul: recipe.ul ?? null,
-        });
+        setState({ loading: false, error: null, readings: trendData });
       })
       .catch((err) => {
         if (cancelled) return;
-        setState({
-          loading: false,
-          error: err.message,
-          readings: [],
-          ll: null,
-          ul: null,
-        });
+        setState({ loading: false, error: err.message, readings: [] });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [row.test_id, row.model_code]);
+  }, [row.test_id]);
 
-  const { loading, error, readings, ll, ul } = state;
+  const { loading, error, readings } = state;
 
   if (loading) {
     return (
@@ -108,11 +94,7 @@ export default function ReportAccordion({ row }) {
     label: fmtTime(r.time),
     v: r.vacuum,
   }));
-  const allY = [
-    ...vals,
-    ...(ll != null ? [ll] : []),
-    ...(ul != null ? [ul] : []),
-  ];
+  const allY = [...vals, ...(ul != null ? [ul] : [])];
   const yPad = allY.length
     ? (Math.max(...allY) - Math.min(...allY)) * 0.15 || 0.05
     : 0.5;
@@ -175,14 +157,6 @@ export default function ReportAccordion({ row }) {
                 ]}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              {ll != null && (
-                <ReferenceLine
-                  y={ll}
-                  stroke="#f97316"
-                  strokeDasharray="7 5"
-                  label={{ value: `LL (${ll})`, fontSize: 10, fill: "#f97316" }}
-                />
-              )}
               {ul != null && (
                 <ReferenceLine
                   y={ul}
@@ -215,7 +189,6 @@ export default function ReportAccordion({ row }) {
               <tr>
                 <th className="px-3 py-1.5 text-left">Sr.No.</th>
                 <th className="px-3 py-1.5 text-left">Time</th>
-                <th className="px-3 py-1.5 text-center">Lower Limit</th>
                 <th className="px-3 py-1.5 text-center">Vacuum (mbar)</th>
                 <th className="px-3 py-1.5 text-center">Upper Limit</th>
                 <th className="px-3 py-1.5 text-center">Result</th>
@@ -227,9 +200,6 @@ export default function ReportAccordion({ row }) {
                   <td className="px-3 py-1 text-slate-400">{i + 1}</td>
                   <td className="px-3 py-1 text-slate-600 whitespace-nowrap">
                     {fmtTime(r.time)}
-                  </td>
-                  <td className="px-3 py-1 text-center text-slate-600 whitespace-nowrap">
-                    {ll != null ? Number(ll).toFixed(3) : "—"}
                   </td>
                   <td className="px-3 py-1 text-center text-[#2563eb] font-semibold tabular">
                     {r.vacuum != null ? Number(r.vacuum).toFixed(3) : "—"}

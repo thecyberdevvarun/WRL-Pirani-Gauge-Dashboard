@@ -18,7 +18,7 @@ const STATUS_TEXT_COLOR = {
 
 const MAX_POINTS = 80;
 
-function formatRemaining(sec) {
+function formatDuration(sec) {
   if (sec === null || sec === undefined) return null;
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -30,7 +30,7 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
   const [detail, setDetail] = useState(null);
   const [liveValue, setLiveValue] = useState(null);
   const [chartData, setChartData] = useState([]);
-  const [remaining, setRemaining] = useState(null);
+  const [elapsed, setElapsed] = useState(null);
   const tickRef = useRef(0);
 
   // Load detail whenever a different gauge is selected
@@ -44,25 +44,20 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
       .catch(() => toast.error("Unable to load fixture details"));
   }, [gaugeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Seed countdown from the fixture's reported remaining time
+  // Test time: elapsed since start_time, ticking up — computed from wall-clock
+  // rather than the server's countdown, so it's accurate regardless of the
+  // fixed test-duration cap.
   useEffect(() => {
-    if (fixture?.status === "RUNNING" && fixture.remaining != null) {
-      setRemaining(fixture.remaining);
-    } else {
-      setRemaining(null);
+    if (fixture?.status !== "RUNNING" || !detail?.start_time) {
+      setElapsed(null);
+      return undefined;
     }
-  }, [gaugeId, fixture?.status, fixture?.remaining]);
-
-  // Countdown ticker
-  useEffect(() => {
-    if (remaining === null) return;
-    if (remaining <= 0) return;
-    const t = setInterval(
-      () => setRemaining((r) => (r !== null && r > 0 ? r - 1 : r)),
-      1000,
-    );
+    const startMs = new Date(detail.start_time).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
+    tick();
+    const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, [remaining !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gaugeId, fixture?.status, detail?.start_time]);
 
   // Live vacuum polling
   useEffect(() => {
@@ -161,7 +156,7 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
               <>
                 <div className="text-amber-600 font-semibold pt-1 flex items-center gap-1.5">
                   <FiClock className="shrink-0" />
-                  <span>Remaining: {formatRemaining(remaining) || "—"}</span>
+                  <span>Test time: {formatDuration(elapsed) || "—"}</span>
                 </div>
                 <button
                   type="button"
@@ -182,11 +177,10 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
             <span className="text-xs text-slate-400">mbar</span>
           </div>
 
-          <LiveVacuumChart data={chartData} ll={detail.ll} ul={detail.ul} />
+          <LiveVacuumChart data={chartData} ul={detail.ul} />
 
           <div className="text-xs mt-2 text-slate-500 tabular">
-            LL: <b>{detail.ll ?? "—"}</b> mbar &nbsp;|&nbsp; UL:{" "}
-            <b>{detail.ul ?? "—"}</b> mbar
+            Upper Limit: <b>{detail.ul ?? "—"}</b> mbar
             {detail.start_time && (
               <>
                 <br />
