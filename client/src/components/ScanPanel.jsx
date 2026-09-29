@@ -87,7 +87,10 @@ export default function ScanPanel({
     setStarting(true);
     try {
       // Display-only — a missing Material record no longer blocks starting a test.
-      const material = await getMaterialByCode(code).catch(() => ({ exists: false, name: null }));
+      const material = await getMaterialByCode(code).catch(() => ({
+        exists: false,
+        name: null,
+      }));
       setModelCode(code);
       setModelName(material.exists ? material.name : "UNKNOWN MODEL");
 
@@ -122,9 +125,7 @@ export default function ScanPanel({
       </h3>
       <p className="text-xs text-slate-400 mb-4">
         Line:{" "}
-        <span className="font-semibold text-slate-600">
-          {lineLabel || "—"}
-        </span>
+        <span className="font-semibold text-slate-600">{lineLabel || "—"}</span>
         {gaugeIds.length ? ` · ${gaugeIds.length} gauges` : ""}
       </p>
 
@@ -139,9 +140,7 @@ export default function ScanPanel({
         className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
       />
 
-      <label className="block text-xs mb-1 text-slate-500">
-        Gauge ID <span className="text-slate-400">(click fixture to fill)</span>
-      </label>
+      <label className="block text-xs mb-1 text-slate-500">Gauge ID</label>
       <input
         ref={gaugeRef}
         type="number"

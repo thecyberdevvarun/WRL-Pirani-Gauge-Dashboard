@@ -31,18 +31,25 @@ function lerp(a, b, t) {
  * the `gap` positions ahead of the scanned-in gauge. This is a decorative
  * approximation — there's no real position sensor feeding this, so it's
  * paced by a fixed animation speed, not actual elapsed/remaining test time. */
-function TravelingMarker({ points, fromIdx, toIdx, color, fromLabel, toLabel }) {
+function TravelingMarker({
+  points,
+  fromIdx,
+  toIdx,
+  color,
+  fromLabel,
+  toLabel,
+}) {
   const [pos, setPos] = useState(null);
   const frameRef = useRef(null);
 
   const waypoints = useMemo(() => {
     const n = points.length;
     if (!n) return [];
-    const steps = ((toIdx - fromIdx) % n + n) % n;
+    const steps = (((toIdx - fromIdx) % n) + n) % n;
     if (steps === 0) return [];
     const pts = [];
     for (let s = 0; s <= steps; s++) {
-      pts.push(points[((fromIdx + s) % n + n) % n]);
+      pts.push(points[(((fromIdx + s) % n) + n) % n]);
     }
     return pts;
   }, [points, fromIdx, toIdx]);
@@ -54,7 +61,10 @@ function TravelingMarker({ points, fromIdx, toIdx, color, fromLabel, toLabel }) 
     }
 
     const steps = waypoints.length - 1;
-    const durationMs = Math.min(MAX_LAP_MS, Math.max(MIN_LAP_MS, steps * MS_PER_STEP));
+    const durationMs = Math.min(
+      MAX_LAP_MS,
+      Math.max(MIN_LAP_MS, steps * MS_PER_STEP),
+    );
     const start = performance.now();
 
     const tick = (now) => {
@@ -128,7 +138,7 @@ export default function ConveyorTrack({
   // be a contiguous 1..N range once configured via Settings.
   const indexBySlaveId = useMemo(
     () => new Map(gaugeIds.map((id, i) => [id, i])),
-    [gaugeIds]
+    [gaugeIds],
   );
 
   if (!gaugeCount) {
@@ -175,7 +185,8 @@ export default function ConveyorTrack({
           .map((f) => {
             const fromIdx = indexBySlaveId.get(f.slave_id);
             if (fromIdx === undefined) return null;
-            const toIdx = ((fromIdx + gap) % gaugeCount + gaugeCount) % gaugeCount;
+            const toIdx =
+              (((fromIdx + gap) % gaugeCount) + gaugeCount) % gaugeCount;
             const toSlaveId = gaugeIds[toIdx];
             return (
               <TravelingMarker

@@ -42,7 +42,7 @@ export default function FixturesPage() {
       () => {
         es.close();
         pollTimer = setInterval(refreshFixtures, 2000);
-      }
+      },
     );
     return () => {
       es.close();
@@ -74,10 +74,10 @@ export default function FixturesPage() {
     return c;
   }, [lineFixtures]);
 
-  const selectedFixture = lineFixtures.find((f) => f.slave_id === selectedGaugeId) || null;
+  const selectedFixture =
+    lineFixtures.find((f) => f.slave_id === selectedGaugeId) || null;
 
   const handleSelect = (id) => {
-    setGaugeId(String(id));
     setSelectedGaugeId(id);
   };
 
