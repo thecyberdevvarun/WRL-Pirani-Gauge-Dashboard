@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # auto_stop_cycle_gauge) hasn't already stopped it first. No longer
 # per-recipe configurable — every test uses this fixed cap.
 MAX_DURATION_MIN = 60
-MODBUS_REGISTER  = 3
+MODBUS_REGISTER = 3
 
 # Maps slave_id -> {"event": Event, "manual": bool} for currently-running tests.
 # "manual" distinguishes an operator-requested abort (forces final_status to
@@ -70,7 +70,8 @@ def stop_test(slave_id: int, manual: bool = True) -> bool:
             this_event.set()
             logger.info(
                 "Gauge %s: minimum test duration reached — applying deferred "
-                "IN/OUT auto-stop", slave_id,
+                "IN/OUT auto-stop",
+                slave_id,
             )
 
         t = threading.Timer(remaining, _fire)
@@ -80,7 +81,10 @@ def stop_test(slave_id: int, manual: bool = True) -> bool:
         logger.info(
             "Gauge %s: IN/OUT auto-stop requested at %.1fs elapsed (line's "
             "minimum test duration is %ss) — deferring stop by %.1fs",
-            slave_id, elapsed, entry["min_duration_sec"], remaining,
+            slave_id,
+            elapsed,
+            entry["min_duration_sec"],
+            remaining,
         )
         return True
 
@@ -91,8 +95,19 @@ def get_active_tests():
         return sorted(STOP_FLAGS.keys())
 
 
-def run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
-             upper_limit, poll_interval_sec, reading_delay_sec=0, min_duration_sec=0):
+def run_test(
+    serial_no,
+    model_code,
+    model_name,
+    line_name,
+    slave_id,
+    host,
+    port,
+    upper_limit,
+    poll_interval_sec,
+    reading_delay_sec=0,
+    min_duration_sec=0,
+):
     """Start a vacuum leak test. Returns immediately; test runs in background thread.
 
     Every value here is already resolved by the caller (app.py) — from
@@ -112,7 +127,9 @@ def run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
 
     duration_min = MAX_DURATION_MIN
     poll_sec = poll_interval_sec
-    test_id = create_test_header(serial_no, model_code, model_name, line_name, slave_id, upper_limit)
+    test_id = create_test_header(
+        serial_no, model_code, model_name, line_name, slave_id, upper_limit
+    )
 
     stop_event = threading.Event()
     with _STOP_LOCK:
@@ -126,28 +143,31 @@ def run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
 
     def _execute():
         final_status = "PASS"
+        valid_readings = 0  # readings actually logged; failed reads are skipped
         end_time = time.time() + (duration_min * 60)
         client = None
 
         try:
-            client = ModbusTcpClient(
-                host=host,
-                port=port,
-                timeout=5
-            )
+            client = ModbusTcpClient(host=host, port=port, timeout=5)
 
             if not client.connect():
                 logger.error("Gauge %s: Modbus gateway unreachable", slave_id)
                 close_test_header(test_id, "ERROR")
                 return
 
-            logger.info("Test started: gauge=%s  serial=%s  model=%s  duration=%smin",
-                        slave_id, serial_no, model_code, duration_min)
+            logger.info(
+                "Test started: gauge=%s  serial=%s  model=%s  duration=%smin",
+                slave_id,
+                serial_no,
+                model_code,
+                duration_min,
+            )
 
             if reading_delay_sec > 0:
                 logger.info(
                     "Gauge %s: reading startup delay %ss before logging begins",
-                    slave_id, reading_delay_sec,
+                    slave_id,
+                    reading_delay_sec,
                 )
                 stop_event.wait(reading_delay_sec)
 
@@ -158,22 +178,27 @@ def run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
                     )
 
                     if rr and not rr.isError():
-                        raw = rr.registers[1] / 1000
-                        vacuum = raw if math.isfinite(raw) else None
+                        vacuum = rr.registers[1] / 1000
 
-                        if vacuum is None:
-                            log_reading(test_id, None, "ERROR")
-                        else:
+                        if math.isfinite(vacuum):
                             reading_ok = vacuum <= upper_limit
                             if not reading_ok:
                                 final_status = "FAIL"
-                            log_reading(test_id, vacuum, "PASS" if reading_ok else "FAIL")
+                            log_reading(
+                                test_id, vacuum, "PASS" if reading_ok else "FAIL"
+                            )
+                            valid_readings += 1
+                        else:
+                            logger.warning(
+                                "Gauge %s: invalid reading skipped", slave_id
+                            )
                     else:
-                        log_reading(test_id, None, "ERROR")
+                        logger.warning(
+                            "Gauge %s: no reading from gauge, skipped", slave_id
+                        )
 
                 except Exception as ex:
-                    logger.warning("Gauge %s read error: %s", slave_id, ex)
-                    log_reading(test_id, None, "ERROR")
+                    logger.warning("Gauge %s read error, skipped: %s", slave_id, ex)
 
                 stop_event.wait(poll_sec)
 
@@ -186,8 +211,15 @@ def run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
                 else:
                     logger.info(
                         "Test auto-completed by IN/OUT cycle: gauge=%s result=%s",
-                        slave_id, final_status,
+                        slave_id,
+                        final_status,
                     )
+
+            # No valid reading at all (gauge offline/unreadable) must not
+            # be reported as PASS.
+            if final_status == "PASS" and valid_readings == 0:
+                logger.error("Gauge %s: no valid readings during test", slave_id)
+                final_status = "ERROR"
 
         except Exception as e:
             logger.error("Test fatal error on gauge %s: %s", slave_id, e)
@@ -212,5 +244,5 @@ def run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
     return {
         "status": "STARTED",
         "test_id": str(test_id),
-        "message": f"Test started on Gauge {slave_id}"
+        "message": f"Test started on Gauge {slave_id}",
     }
