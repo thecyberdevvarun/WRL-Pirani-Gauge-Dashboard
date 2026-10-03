@@ -17,8 +17,8 @@ MODBUS_REGISTER = 3
 
 # Maps slave_id -> {"event": Event, "manual": bool} for currently-running tests.
 # "manual" distinguishes an operator-requested abort (forces final_status to
-# ABORTED) from the automatic IN/OUT-cycle stop (lets the naturally
-# accumulated PASS/FAIL stand, same as a normal timeout completion).
+# ABORTED) from the automatic IN/OUT-cycle stop (lets the result of the last
+# valid reading stand, same as a normal timeout completion).
 STOP_FLAGS: dict[int, dict] = {}
 _STOP_LOCK = threading.Lock()
 
@@ -30,8 +30,8 @@ def stop_test(slave_id: int, manual: bool = True) -> bool:
     and forces final result to ABORTED — this overrides any pending deferred
     auto-stop below.
 
-    manual=False (automatic IN/OUT-cycle trigger): final result is whatever the
-    test naturally accumulated so far (PASS/FAIL), same as a normal timeout.
+    manual=False (automatic IN/OUT-cycle trigger): final result is the result
+    of the last valid reading (PASS/FAIL), same as a normal timeout.
     If the test hasn't yet run for its line's configured minimum duration,
     the stop is deferred (via a background timer) until that minimum is
     reached instead of cutting the test short right away; if the minimum has
@@ -115,7 +115,8 @@ def run_test(
     poll_interval_sec, reading_delay_sec, min_duration_sec), and the external
     Material lookup (model_name). No recipe/DB lookup happens in here anymore.
 
-    upper_limit: single common pass/fail ceiling (no lower bound).
+    upper_limit: single common pass/fail ceiling (no lower bound). The test's
+    overall result is decided by the last valid reading only.
     reading_delay_sec: settle time after connecting before readings start
     counting toward PASS/FAIL (e.g. letting the vacuum stabilize right after
     a test begins). Comes out of the overall MAX_DURATION_MIN window rather
@@ -182,8 +183,10 @@ def run_test(
 
                         if math.isfinite(vacuum):
                             reading_ok = vacuum <= upper_limit
-                            if not reading_ok:
-                                final_status = "FAIL"
+                            # Overall result follows the LAST valid reading
+                            # only: an earlier FAIL is overwritten by a later
+                            # PASS, and a late FAIL fails the whole test.
+                            final_status = "PASS" if reading_ok else "FAIL"
                             log_reading(
                                 test_id, vacuum, "PASS" if reading_ok else "FAIL"
                             )
