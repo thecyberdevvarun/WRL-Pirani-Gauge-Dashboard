@@ -1,15 +1,22 @@
-from flask import Flask, request, jsonify, send_file, send_from_directory, Response
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    send_file,
+    send_from_directory,
+    Response,
+    session,
+    g,
+)
 from test_runner import get_active_tests, run_test, stop_test, MAX_DURATION_MIN
 from db import (
     get_connection,
-    ensure_gauge_config_table,
     ensure_test_header_columns,
-    get_gauge_config_rows,
-    get_conflicting_slave_ids,
-    replace_line_gauge_config,
-    delete_line_gauge_config,
     get_material_name,
 )
+from lines_config import ConfigError, load_config_from_environment, warnings_for
+from polling import PollingService, SingleOwnerLease
+from register_maps import REGISTER_MAPS, SUCCESS, read_gauge
 import pandas as pd
 import io
 import time
@@ -17,12 +24,13 @@ import threading
 import queue
 import logging
 import os
-import re
-from datetime import datetime
+import atexit
+import hmac
+import secrets
+from datetime import datetime, timedelta
 from functools import wraps
 from cachetools import TTLCache
 import json
-import math
 from pymodbus.client.sync import ModbusTcpClient
 import sys
 from reportlab.lib.pagesizes import A4
@@ -32,14 +40,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from openpyxl.drawing.image import Image as XLImage
 import openpyxl
-from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.legends import Legend
-from datetime import datetime
 from reportlab.graphics.shapes import Drawing, String
-from reportlab.graphics.charts.linecharts import HorizontalLineChart
-from reportlab.graphics.charts.legends import Legend
-from reportlab.lib import colors
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -53,30 +56,58 @@ CLIENT_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client",
 app = Flask(__name__, static_folder=None)
 
 # =========================================================
+# PRODUCTION LINES — everything comes from .env (see lines_config.py)
+# =========================================================
+# Lines (label, gauge count, USRs, upper limit, poll interval, IN/OUT gap,
+# network), users and polling settings. Loaded once at startup; edit .env and
+# restart the app to change them. A bad .env stops the app from starting and
+# prints every problem found.
+try:
+    CONFIG = load_config_from_environment()
+except ConfigError as exc:
+    logger.critical("%s", exc)
+    raise
+
+LINES = CONFIG.lines         # LINE_KEY -> lines_config.Line
+USERS = CONFIG.users         # lower-case username -> lines_config.User
+SETTINGS = CONFIG.settings   # polling mode, timeouts, backoff, ...
+
+# =========================================================
+# SESSIONS — the backend, not the browser, decides which line you are on
+# =========================================================
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    logger.warning(
+        "SECRET_KEY is not set in .env — using a temporary key, so everyone is "
+        "logged out whenever the app restarts."
+    )
+try:
+    SESSION_HOURS = float(os.environ.get("SESSION_HOURS", "12"))
+except ValueError:
+    SESSION_HOURS = 12.0
+
+app.secret_key = SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=SESSION_HOURS),
+)
+
+# =========================================================
 # GLOBALS
 # =========================================================
-# GAUGE_CONFIG: slave_id -> {name, host, port, line_key, enabled}
-# ALL_GAUGES: derived, sorted, enabled-only slave ids (kept for fixture_worker)
-# HOST_POLLERS: (host, port) -> {"thread": Thread, "stop_event": Event}
-# LINE_GAP: line_key -> IN/OUT auto-stop distance (0 = disabled)
-# LINE_GAUGE_ORDER: line_key -> sorted enabled slave_ids, the cyclic position
-#   sequence a gap is measured against (see _auto_stop_out_of_cycle_gauge)
-# LINE_READING_DELAY: line_key -> reading startup delay in seconds (0 = disabled)
-# LINE_UPPER_LIMIT: line_key -> single common pass/fail ceiling (0 = not configured)
-# LINE_POLL_INTERVAL: line_key -> seconds between readings during a test
-# LINE_MIN_DURATION: line_key -> floor (seconds) the IN/OUT auto-stop can't cut
-#   a test shorter than (0 = disabled); never applies to a manual Stop
-GAUGE_CONFIG = {}
-ALL_GAUGES = []
-HOST_POLLERS = {}
-LINE_GAP = {}
-LINE_GAUGE_ORDER = {}
-LINE_READING_DELAY = {}
-LINE_UPPER_LIMIT = {}
-LINE_POLL_INTERVAL = {}
-LINE_MIN_DURATION = {}
-CONFIG_LOCK = threading.Lock()
-POLLER_LOCK = threading.Lock()
+# Every gauge is identified by (line_key, slave_id): the slave ID is the gauge
+# number *within* its line, so "gauge 1" exists on every line.
+#
+# POLLING:       managed Modbus polling (one worker per USR) + live gauge status
+# FIXTURE_CACHE: line_key -> [fixture state dicts, one per enabled gauge]
+# POLL_LEASE:    only one process on this PC may poll the gauges
+FIXTURE_CACHE = {}
+POLLING = PollingService(LINES, SETTINGS)
+POLL_LEASE = SingleOwnerLease(SETTINGS.lease_port)
+REPORT_CACHE = TTLCache(maxsize=200, ttl=30)
+LOCK = threading.Lock()
 
 # Company logo, embedded in the app header/login page (via the built
 # frontend) and in PDF/Excel report exports (directly, below).
@@ -84,151 +115,205 @@ LOGO_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "logo", "Western-Refrigeration-768x453.jpg"
 )
 
-FIXTURE_CACHE = []
-MODBUS_CACHE = {}
-REPORT_CACHE = TTLCache(maxsize=200, ttl=30)
-LOCK = threading.Lock()
-
-# Per-client SSE queues (one queue per connected browser tab)
-SSE_QUEUES = []
+# Per-client SSE queues: (line_key, queue) — one per connected browser tab,
+# so a client only ever receives the fixtures of the line it is logged into.
+SSE_CLIENTS = []
 SSE_LOCK = threading.Lock()
 
 
 # =========================================================
-# GAUGE / LINE CONFIG — load from DB, reconcile poller threads
+# AUTH
 # =========================================================
-def load_gauge_config_from_db():
-    rows = get_gauge_config_rows()
-    new_cfg = {
-        r["slave_id"]: {
-            "name": r["gauge_name"],
-            "host": r["host"],
-            "port": r["port"],
-            "line_key": r["line_key"],
-            "enabled": bool(r["enabled"]),
-        }
-        for r in rows
+# A login is a User: one or more authorised lines and a role. Every line has
+# its own login (one line -> selected automatically); extra USERS may be
+# authorised for several lines and then choose which one to work on. The
+# chosen line lives in the signed session cookie and is re-checked against the
+# user's authorised lines on every request.
+ROLE_LABEL = {"operator": "Operator", "admin": "Admin"}
+
+
+def current_user():
+    """The logged-in User, or None (also None if removed from .env since login)."""
+    return USERS.get((session.get("username") or "").lower())
+
+
+def current_line():
+    """The Line this session is working on, or None."""
+    user = current_user()
+    key = session.get("line_key")
+    if user is None or key is None or key not in user.lines:
+        return None
+    return LINES.get(key)
+
+
+def user_required(fn):
+    """Logged in; a production line does not have to be selected yet."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if user is None:
+            session.clear()
+            return jsonify({"error": "Not logged in"}), 401
+        g.user = user
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def login_required(fn):
+    """Logged in with a line selected; exposes g.user and g.line.
+
+    Every data endpoint is scoped to g.line — the line is never taken from the
+    request, so a user cannot read or control a line they are not authorised for.
+    """
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if user is None:
+            session.clear()
+            return jsonify({"error": "Not logged in"}), 401
+        line = current_line()
+        if line is None:
+            return (
+                jsonify({"error": "No production line selected", "code": "line_not_selected"}),
+                409,
+            )
+        g.user, g.line = user, line
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def admin_required(fn):
+    """Use below @login_required: only users with the admin role may continue."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if g.user.role != "admin":
+            return jsonify({"error": "This action needs an admin login"}), 403
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def _match_user(username, password):
+    """Check credentials against every user, without exiting early on a match."""
+    u = username.strip().lower().encode()
+    p = password.encode()
+    match = None
+    for user in USERS.values():
+        user_ok = hmac.compare_digest(u, user.username.lower().encode())
+        pass_ok = hmac.compare_digest(p, user.password.encode())
+        if user_ok and pass_ok:
+            match = user
+    return match
+
+
+def _session_payload(user, line):
+    return {
+        "username": user.username,
+        "role": ROLE_LABEL[user.role],
+        "line": line.key if line else None,
+        "line_label": line.label if line else None,
+        "gauge_count": len(line.gauge_ids) if line else None,
+        "lines": [
+            {"key": k, "label": LINES[k].label, "gauge_count": len(LINES[k].gauge_ids)}
+            for k in user.lines
+            if k in LINES
+        ],
+        "needs_line_selection": line is None,
     }
-    new_gap = {}
-    new_reading_delay = {}
-    new_upper_limit = {}
-    new_poll_interval = {}
-    new_min_duration = {}
-    for r in rows:
-        new_gap.setdefault(r["line_key"], r["gap"] or 0)
-        new_reading_delay.setdefault(r["line_key"], r["reading_delay_sec"] or 0)
-        new_upper_limit.setdefault(r["line_key"], r["upper_limit"] or 0)
-        new_poll_interval.setdefault(r["line_key"], r["poll_interval_sec"] or 60)
-        new_min_duration.setdefault(
-            r["line_key"], r["min_duration_sec"] if r["min_duration_sec"] is not None else 600
-        )
-
-    with CONFIG_LOCK:
-        GAUGE_CONFIG.clear()
-        GAUGE_CONFIG.update(new_cfg)
-        ALL_GAUGES[:] = sorted(sid for sid, g in GAUGE_CONFIG.items() if g["enabled"])
-
-        LINE_GAP.clear()
-        LINE_GAP.update(new_gap)
-
-        LINE_READING_DELAY.clear()
-        LINE_READING_DELAY.update(new_reading_delay)
-
-        LINE_UPPER_LIMIT.clear()
-        LINE_UPPER_LIMIT.update(new_upper_limit)
-
-        LINE_POLL_INTERVAL.clear()
-        LINE_POLL_INTERVAL.update(new_poll_interval)
-
-        LINE_MIN_DURATION.clear()
-        LINE_MIN_DURATION.update(new_min_duration)
-
-        LINE_GAUGE_ORDER.clear()
-        for sid, g in GAUGE_CONFIG.items():
-            if g["enabled"]:
-                LINE_GAUGE_ORDER.setdefault(g["line_key"], []).append(sid)
-        for line_key in LINE_GAUGE_ORDER:
-            LINE_GAUGE_ORDER[line_key].sort()
 
 
-def auto_stop_cycle_gauge(line_key, in_gauge_id):
-    """IN/OUT cycle auto-stop. After a new IN scan starts a test on
-    in_gauge_id, this line's gap setting picks exactly ONE gauge to stop: the
-    gauge `gap` positions ahead of it in the line's cyclic sequence (the
-    "last" gauge of the cycle). Scanning gauge 15 with gap=4 stops gauge 19
-    and nothing else.
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    d = request.get_json(silent=True) or {}
+    username = d.get("username")
+    password = d.get("password")
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify({"error": "Username and password are required"}), 400
 
-    No other gauge is touched. If a gauge in between was skipped (empty /
-    reworked product, never scanned) it is simply left alone, and gauges that
-    are running ahead of the window are never stopped early. If the target
-    gauge has no active test (e.g. it was skipped) this is a no-op.
+    user = _match_user(username, password)
+    if user is None:
+        logger.warning("Failed login attempt for username '%s'", username.strip()[:50])
+        return jsonify({"error": "Invalid username or password"}), 401
 
-    The target's naturally accumulated PASS/FAIL stands (not ABORTED), same as
-    a normal timeout completion. If its test hasn't yet reached the line's
-    minimum test duration, stop_test() defers the actual stop rather than
-    cutting it short.
-    Returns a list with the one gauge id a stop was requested for (empty if
-    nothing was stopped)."""
-    with CONFIG_LOCK:
-        gap = LINE_GAP.get(line_key, 0)
-        order = list(LINE_GAUGE_ORDER.get(line_key, []))
+    session.clear()
+    session["username"] = user.username
+    if len(user.lines) == 1:
+        session["line_key"] = user.lines[0]          # single line: no chooser needed
+    session.permanent = True
+    logger.info("Login: user=%s lines=%s", user.username, ",".join(user.lines))
+    return jsonify(_session_payload(user, current_line()))
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    # Ends this browser session only. Polling workers belong to the backend and
+    # keep running for everyone else.
+    session.clear()
+    return jsonify({"success": True})
+
+
+@app.route("/api/auth/me")
+@user_required
+def auth_me():
+    return jsonify(_session_payload(g.user, current_line()))
+
+
+@app.route("/api/auth/select-line", methods=["POST"])
+@user_required
+def auth_select_line():
+    d = request.get_json(silent=True) or {}
+    key = d.get("line")
+    key = key.strip().upper() if isinstance(key, str) else ""
+    if key not in g.user.lines or key not in LINES:
+        logger.warning("Line selection refused: user=%s requested=%s", g.user.username, key[:50])
+        return jsonify({"error": "You are not authorised for that line"}), 403
+    session["line_key"] = key
+    logger.info("Line selected: user=%s line=%s", g.user.username, key)
+    return jsonify(_session_payload(g.user, LINES[key]))
+
+
+# =========================================================
+# IN/OUT AUTO-STOP CYCLE
+# =========================================================
+def auto_stop_cycle_gauge(line, in_gauge_id):
+    """After a new IN scan starts a test on in_gauge_id, this line's gap
+    setting means every gauge in the `gap` positions immediately *ahead* of
+    it is now in the exit window — scanning gauge 15 with gap=5 sweeps
+    gauges 16, 17, 18, 19, 20 (wrapping around if needed). Any of those that
+    still have a test running gets stopped, letting its naturally
+    accumulated PASS/FAIL stand (not ABORTED) — same outcome as a normal
+    timeout completion. Gauges in the window with no active test are simply
+    a no-op. If a swept gauge's test hasn't yet reached its line's minimum
+    test duration, stop_test() defers the actual stop rather than cutting it
+    short — it still counts as "stopped" here (the request was accepted).
+    Returns the list of gauge ids a stop was requested for (may be empty).
+    Only ever touches gauges of `line` — other lines are never affected."""
+    gap = line.gap
+    order = line.gauge_ids
 
     if not gap or len(order) < 2 or in_gauge_id not in order:
         return []
 
     idx = order.index(in_gauge_id)
     n = len(order)
-    target = order[(idx + gap) % n]
-    if target == in_gauge_id:  # gap is a whole number of laps; nothing to stop
-        return []
+    span = min(gap, n - 1)  # never wrap far enough to include in_gauge_id itself
 
-    if stop_test(target, manual=False):
-        logger.info(
-            "IN/OUT cycle: gauge %s scanned IN -> auto-stopping gauge %s "
-            "(exactly %s positions ahead, line=%s)",
-            in_gauge_id, target, gap, line_key,
-        )
-        return [target]
-    return []
-
-
-def _gauges_for_host(host, port):
-    with CONFIG_LOCK:
-        return sorted(
-            sid for sid, g in GAUGE_CONFIG.items()
-            if g["host"] == host and g["port"] == port and g["enabled"]
-        )
-
-
-def reconcile_pollers():
-    """Start a poller thread for every (host, port) with >=1 enabled gauge
-    across ALL lines combined, and stop pollers for hosts no longer needed."""
-    with POLLER_LOCK:
-        with CONFIG_LOCK:
-            desired = {(g["host"], g["port"]) for g in GAUGE_CONFIG.values() if g["enabled"]}
-
-        for key in list(HOST_POLLERS.keys()):
-            if key not in desired:
-                entry = HOST_POLLERS.pop(key)
-                entry["stop_event"].set()
-                logger.info("Stopping Modbus poller for %s:%s", *key)
-
-        for (host, port) in desired:
-            if (host, port) not in HOST_POLLERS:
-                stop_event = threading.Event()
-                t = threading.Thread(
-                    target=modbus_worker, args=(host, port, stop_event),
-                    daemon=True, name=f"modbus-{host}:{port}",
-                )
-                HOST_POLLERS[(host, port)] = {"thread": t, "stop_event": stop_event}
-                t.start()
-                logger.info("Starting Modbus poller for %s:%s", host, port)
-
-
-def _apply_gauge_config_change():
-    """Call after every successful settings DB write to hot-reload polling."""
-    load_gauge_config_from_db()
-    reconcile_pollers()
+    stopped = []
+    for offset in range(1, span + 1):
+        target = order[(idx + offset) % n]
+        if stop_test(line.key, target, manual=False):
+            stopped.append(target)
+            logger.info(
+                "IN/OUT cycle: gauge %s scanned IN -> auto-stopping gauge %s "
+                "(%s of %s positions ahead, gap=%s, line=%s)",
+                in_gauge_id, target, offset, span, gap, line.key,
+            )
+    return stopped
 
 
 # =========================================================
@@ -282,31 +367,44 @@ def serve_react_app(path=""):
 # =========================================================
 @app.route("/api/health")
 def health():
-    with CONFIG_LOCK:
-        gateways = sorted({(g["host"], g["port"]) for g in GAUGE_CONFIG.values() if g["enabled"]})
-    with LOCK:
-        active = sum(1 for v in MODBUS_CACHE.values() if v is not None)
-        polled = len(MODBUS_CACHE)
-    return jsonify(
-        {
-            "status": "ok",
-            "gateways": [f"{h}:{p}" for h, p in gateways],
-            "gauges_responding": active,
-            "gauges_polled": polled,
-            "timestamp": datetime.now().isoformat(),
-        }
-    )
+    body = {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+    # Gateway and worker details only for a logged-in session with a line, and
+    # only for that line.
+    line = current_line()
+    if line is not None:
+        usrs = POLLING.line_snapshot(line.key)
+        gauges = [gs for u in usrs for gs in u["gauges"].values()]
+        enabled = [u for u in usrs if u["enabled"]]
+        body.update(
+            {
+                "gateways": [gw.address for gw in line.gateways],
+                "gauges_responding": sum(1 for gs in gauges if gs["freshness"] == "valid"),
+                "gauges_polled": sum(1 for gs in gauges if gs["communication_status"] is not None),
+                "polling": {
+                    "mode": SETTINGS.polling_mode,
+                    "polled_here": POLLING.polled_here(line.key),
+                    "lease_held": POLL_LEASE.held,
+                    "usrs_enabled": len(enabled),
+                    "usrs_connected": sum(1 for u in enabled if u["connection_status"] == "connected"),
+                    "workers_alive": sum(1 for u in enabled if u["worker_alive"]),
+                },
+            }
+        )
+    return jsonify(body)
 
 
 # =========================================================
 # TODAY'S STATS
 # =========================================================
 @app.route("/api/stats/today")
+@login_required
 @db_safe
 def today_stats():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT
             COUNT(*)                                                        AS total,
             SUM(CASE WHEN final_result = 'PASS' THEN 1 ELSE 0 END)        AS pass_count,
@@ -314,7 +412,10 @@ def today_stats():
             SUM(CASE WHEN final_result IS NULL   THEN 1 ELSE 0 END)       AS running_count
         FROM pirani_test_header
         WHERE CAST(start_time AS DATE) = CAST(GETDATE() AS DATE)
-    """)
+          AND line_name = ?
+        """,
+        (g.line.key,),
+    )
     row = cur.fetchone()
     conn.close()
 
@@ -339,6 +440,7 @@ def today_stats():
 # MATERIAL LOOKUP (external system, display-only — does not gate testing)
 # =========================================================
 @app.route("/api/material/<alt_name>")
+@login_required
 @db_safe
 def material_lookup(alt_name):
     name = get_material_name(alt_name)
@@ -349,12 +451,13 @@ def material_lookup(alt_name):
 # START TEST
 # =========================================================
 @app.route("/start-test", methods=["POST"])
+@login_required
 def start_test():
-    d = request.json or {}
+    line = g.line
+    d = request.get_json(silent=True) or {}
 
-    serial_no = d.get("serial_no", "").strip()
-    model_code = d.get("model_code", "").strip()
-    line_name = d.get("line", "")
+    serial_no = (d.get("serial_no") or "").strip()
+    model_code = (d.get("model_code") or "").strip()
 
     try:
         gauge_id = int(d.get("gauge_id", 0))
@@ -369,18 +472,26 @@ def start_test():
             400,
         )
 
-    with CONFIG_LOCK:
-        gcfg = GAUGE_CONFIG.get(gauge_id)
-        line_key = gcfg["line_key"] if gcfg else None
-        reading_delay = LINE_READING_DELAY.get(line_key, 0) if gcfg else 0
-        upper_limit = LINE_UPPER_LIMIT.get(line_key, 0) if gcfg else 0
-        poll_interval = LINE_POLL_INTERVAL.get(line_key, 60) if gcfg else 60
-        min_duration = LINE_MIN_DURATION.get(line_key, 600) if gcfg else 600
-
-    if gcfg is None:
-        return jsonify({"status": "ERROR", "message": f"Unknown Gauge ID {gauge_id}"}), 404
-    if not gcfg["enabled"]:
+    # The line comes from the login session, never from the request body.
+    if gauge_id in line.disabled_gauges:
         return jsonify({"status": "ERROR", "message": f"Gauge {gauge_id} is disabled"}), 400
+    gateway = line.gateway_for(gauge_id) if gauge_id in line.gauge_ids else None
+    if gateway is None:
+        return jsonify({"status": "ERROR", "message": f"Unknown Gauge ID {gauge_id}"}), 404
+
+    # In line_specific mode a PC can only reach its own line's USRs.
+    if not POLLING.polled_here(line.key):
+        return (
+            jsonify(
+                {
+                    "status": "ERROR",
+                    "message": f"{line.label} is not controlled from this PC "
+                    f"(polling mode: {SETTINGS.polling_mode}). Start tests from the "
+                    f"{line.label} line PC.",
+                }
+            ),
+            409,
+        )
 
     # Display-only lookup in an external system — never blocks starting a test.
     try:
@@ -393,18 +504,19 @@ def start_test():
         serial_no=serial_no,
         model_code=model_code,
         model_name=model_name,
-        line_name=line_name,
+        line_name=line.key,
         slave_id=gauge_id,
-        host=gcfg["host"],
-        port=gcfg["port"],
-        upper_limit=upper_limit,
-        poll_interval_sec=poll_interval,
-        reading_delay_sec=reading_delay,
-        min_duration_sec=min_duration,
+        host=gateway.host,
+        port=gateway.port,
+        upper_limit=line.upper_limit,
+        poll_interval_sec=line.poll_interval_sec,
+        reading_delay_sec=line.reading_delay_sec,
+        min_duration_sec=line.min_duration_sec,
+        register_map=line.register_map,
     )
 
     if result.get("status") == "STARTED":
-        auto_stop_cycle_gauge(gcfg["line_key"], gauge_id)
+        auto_stop_cycle_gauge(line, gauge_id)
 
     return jsonify(result)
 
@@ -413,8 +525,9 @@ def start_test():
 # STOP TEST
 # =========================================================
 @app.route("/stop-test/<int:gauge_id>", methods=["POST"])
+@login_required
 def stop_test_route(gauge_id):
-    if stop_test(gauge_id):
+    if stop_test(g.line.key, gauge_id):
         return jsonify(
             {"status": "STOPPED", "message": f"Stop signal sent to Gauge {gauge_id}"}
         )
@@ -427,27 +540,107 @@ def stop_test_route(gauge_id):
 
 
 @app.route("/api/active-tests")
+@login_required
 def active_tests_api():
-    gauges = get_active_tests()
+    gauges = get_active_tests(g.line.key)
     return jsonify({"active_gauges": gauges, "count": len(gauges)})
 
 
 # =========================================================
 # FIXTURE BACKGROUND WORKER
 # =========================================================
-def _broadcast_fixtures(data):
-    """Push data to all connected SSE clients."""
+def _broadcast_fixtures(by_line):
+    """Push each line's fixtures to the SSE clients logged into that line."""
     with SSE_LOCK:
-        for q in SSE_QUEUES:
+        for line_key, q in SSE_CLIENTS:
             try:
-                q.put_nowait(data)
+                q.put_nowait(by_line.get(line_key, []))
             except queue.Full:
                 pass  # Slow client — drop this update
+
+
+def _fixture_state(gid, latest):
+    """Status dict for one gauge, given the latest test row for it (or None)."""
+    if latest is None:
+        return {
+            "slave_id": gid,
+            "status": "IDLE",
+            "color": "gray",
+            "remaining": None,
+            "line": None,
+            "serial_no": None,
+        }
+
+    serial, result, line_name, remaining = latest
+
+    if remaining is not None and remaining <= 0 and result is not None:
+        status, color = ("IDLE", "gray")
+        remaining = None
+    elif result is None:
+        status, color = ("RUNNING", "yellow")
+        remaining = max(0, remaining or 0)
+    elif result == "PASS":
+        status, color = ("PASS", "green")
+        remaining = None
+    elif result == "FAIL":
+        status, color = ("FAIL", "red")
+        remaining = None
+    else:
+        status, color = ("ERROR", "orange")
+        remaining = None
+
+    return {
+        "slave_id": gid,
+        "status": status,
+        "color": color,
+        "remaining": remaining,
+        "line": line_name,
+        "serial_no": serial,
+    }
+
+
+def build_fixtures_by_line(rows):
+    """rows: (line_name, gauge_id, serial_no, final_result, remaining_sec) — the
+    latest test per (line, gauge). Returns {line_key: [fixture, ...]} with one
+    entry per enabled gauge of every configured line; rows for a line that is
+    not configured (e.g. old data) are ignored."""
+    latest = {(r[0], r[1]): (r[2], r[3], r[0], r[4]) for r in rows}
+    return {
+        line.key: [
+            _fixture_state(gid, latest.get((line.key, gid))) for gid in line.gauge_ids
+        ]
+        for line in LINES.values()
+    }
 
 
 def fixture_worker():
     conn = None
     cur = None
+
+    line_keys = list(LINES.keys())
+    placeholders = ",".join("?" * len(line_keys))
+    # Latest test per (line, gauge): the same gauge number exists on every
+    # line, so the line is part of the identity.
+    query = f"""
+        SELECT
+            h.line_name,
+            h.gauge_id,
+            h.serial_no,
+            h.final_result,
+            DATEDIFF(
+                SECOND,
+                GETDATE(),
+                DATEADD(MINUTE, ?, h.start_time)
+            ) AS remaining_sec
+        FROM pirani_test_header h
+        WHERE h.line_name IN ({placeholders})
+          AND h.start_time = (
+            SELECT MAX(start_time)
+            FROM pirani_test_header h2
+            WHERE h2.gauge_id = h.gauge_id
+              AND h2.line_name = h.line_name
+        )
+    """
 
     while True:
         try:
@@ -455,79 +648,14 @@ def fixture_worker():
                 conn = get_connection()
                 cur = conn.cursor()
 
-            cur.execute("""
-                SELECT
-                    h.gauge_id,
-                    h.serial_no,
-                    h.final_result,
-                    h.line_name,
-                    DATEDIFF(
-                        SECOND,
-                        GETDATE(),
-                        DATEADD(MINUTE, ?, h.start_time)
-                    ) AS remaining_sec
-                FROM pirani_test_header h
-                WHERE h.start_time = (
-                    SELECT MAX(start_time)
-                    FROM pirani_test_header h2
-                    WHERE h2.gauge_id = h.gauge_id
-                )
-            """, (MAX_DURATION_MIN,))
-
-            rows = cur.fetchall()
-            latest = {r[0]: (r[1], r[2], r[3], r[4]) for r in rows}
-            fixtures = []
-
-            with CONFIG_LOCK:
-                gauges_snapshot = list(ALL_GAUGES)
-
-            for gid in gauges_snapshot:
-                if gid not in latest:
-                    fixtures.append(
-                        {
-                            "slave_id": gid,
-                            "status": "IDLE",
-                            "color": "gray",
-                            "remaining": None,
-                            "line": None,
-                            "serial_no": None,
-                        }
-                    )
-                    continue
-
-                serial, result, line, remaining = latest[gid]
-
-                if remaining is not None and remaining <= 0 and result is not None:
-                    status, color = ("IDLE", "gray")
-                    remaining = None
-                elif result is None:
-                    status, color = ("RUNNING", "yellow")
-                    remaining = max(0, remaining or 0)
-                elif result == "PASS":
-                    status, color = ("PASS", "green")
-                    remaining = None
-                elif result == "FAIL":
-                    status, color = ("FAIL", "red")
-                    remaining = None
-                else:
-                    status, color = ("ERROR", "orange")
-                    remaining = None
-
-                fixtures.append(
-                    {
-                        "slave_id": gid,
-                        "status": status,
-                        "color": color,
-                        "remaining": remaining,
-                        "line": line,
-                        "serial_no": serial,
-                    }
-                )
+            cur.execute(query, (MAX_DURATION_MIN, *line_keys))
+            by_line = build_fixtures_by_line(cur.fetchall())
 
             with LOCK:
-                FIXTURE_CACHE[:] = fixtures
+                FIXTURE_CACHE.clear()
+                FIXTURE_CACHE.update(by_line)
 
-            _broadcast_fixtures(fixtures)
+            _broadcast_fixtures(by_line)
 
         except Exception as e:
             logger.error("[FIXTURE WORKER] %s", e)
@@ -543,42 +671,33 @@ def fixture_worker():
         time.sleep(2)
 
 
-if "pytest" not in sys.modules:
-    try:
-        ensure_gauge_config_table()
-        ensure_test_header_columns()
-        load_gauge_config_from_db()
-    except Exception:
-        logger.critical(
-            "Gauge config unavailable at startup — Modbus polling disabled",
-            exc_info=True,
-        )
-
-if "pytest" not in sys.modules and os.environ.get("DISABLE_WORKERS", "0") != "1":
-    threading.Thread(target=fixture_worker, daemon=True).start()
-
-
 # =========================================================
 # FIXTURES REST API
 # =========================================================
 @app.route("/api/fixtures")
+@login_required
 def get_fixtures():
-    return jsonify(FIXTURE_CACHE)
+    with LOCK:
+        data = list(FIXTURE_CACHE.get(g.line.key, []))
+    return jsonify(data)
 
 
 # =========================================================
-# FIXTURES SSE (multi-client safe)
+# FIXTURES SSE (multi-client safe, one line per client)
 # =========================================================
 @app.route("/api/fixtures/stream")
+@login_required
 def fixtures_stream():
+    line_key = g.line.key
     client_q = queue.Queue(maxsize=10)
+    client = (line_key, client_q)
     with SSE_LOCK:
-        SSE_QUEUES.append(client_q)
+        SSE_CLIENTS.append(client)
 
     def stream():
         # Push current state immediately on connect
         with LOCK:
-            snapshot = list(FIXTURE_CACHE)
+            snapshot = list(FIXTURE_CACHE.get(line_key, []))
         if snapshot:
             yield f"data: {json.dumps(snapshot)}\n\n"
 
@@ -593,8 +712,8 @@ def fixtures_stream():
             pass
         finally:
             with SSE_LOCK:
-                if client_q in SSE_QUEUES:
-                    SSE_QUEUES.remove(client_q)
+                if client in SSE_CLIENTS:
+                    SSE_CLIENTS.remove(client)
 
     return Response(
         stream(),
@@ -604,78 +723,91 @@ def fixtures_stream():
 
 
 # =========================================================
-# MODBUS POLLING WORKER
+# BACKGROUND SERVICES
 # =========================================================
-def modbus_worker(host, port, stop_event):
-    logger.info("Modbus polling started → %s:%s", host, port)
-    client = None
+def _shutdown_polling():
+    POLLING.stop(timeout=3)
+    POLL_LEASE.release()
 
-    while not stop_event.is_set():
+
+def start_background_services():
+    """Start the fixture worker and the managed Modbus polling.
+
+    Polling needs the single-owner lease so that two processes on this PC can
+    never poll the same USRs. start() is idempotent, so calling this again
+    cannot create duplicate workers.
+    """
+    threading.Thread(target=fixture_worker, daemon=True, name="fixture-worker").start()
+
+    if not POLL_LEASE.acquire():
+        logger.error(
+            "Another process on this PC already holds the polling lease (port %s) — "
+            "this process will NOT poll the gauges. Stop the other instance first.",
+            SETTINGS.lease_port,
+        )
+        return
+    started = POLLING.start()
+    atexit.register(_shutdown_polling)
+    logger.info(
+        "Polling started: mode=%s lines=%s workers=%s",
+        SETTINGS.polling_mode,
+        ",".join(sorted(SETTINGS.poll_lines)),
+        len(started),
+    )
+
+
+def _is_reloader_parent():
+    """Flask's debug reloader imports this module twice; only the child serves requests."""
+    return (
+        os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+        and os.environ.get("WERKZEUG_RUN_MAIN") != "true"
+    )
+
+
+if "pytest" not in sys.modules:
+    for _warning in warnings_for(CONFIG):
+        logger.warning(_warning)
+    logger.info(
+        "Lines loaded from .env: %s",
+        ", ".join(
+            f"{ln.key} ({len(ln.gauge_ids)} gauges, {len(ln.gateways)} USRs)"
+            for ln in LINES.values()
+        ),
+    )
+    if not _is_reloader_parent():
         try:
-            if client is None:
-                client = ModbusTcpClient(host=host, port=port, timeout=5)
+            ensure_test_header_columns()
+        except Exception:
+            logger.critical("Database unavailable at startup", exc_info=True)
 
-            if not client.connect():
-                logger.warning("Modbus gateway not reachable: %s:%s", host, port)
-                stop_event.wait(5)
-                continue
-
-            for sid in _gauges_for_host(host, port):
-                if stop_event.is_set():
-                    break
-                try:
-                    rr = client.read_holding_registers(address=3, count=2, unit=sid)
-                    with LOCK:
-                        if rr and not rr.isError():
-                            value = rr.registers[1] / 1000
-                            MODBUS_CACHE[sid] = value if math.isfinite(value) else None
-                        else:
-                            MODBUS_CACHE[sid] = None
-                except Exception:
-                    with LOCK:
-                        MODBUS_CACHE[sid] = None
-                stop_event.wait(0.03)
-
-            stop_event.wait(2)
-
-        except Exception as e:
-            logger.error("Modbus worker error (%s:%s): %s", host, port, e)
-            try:
-                if client:
-                    client.close()
-            except Exception:
-                pass
-            client = None
-            stop_event.wait(5)
-
-    try:
-        if client:
-            client.close()
-    except Exception:
-        pass
-    logger.info("Modbus polling stopped → %s:%s", host, port)
-
-
-if "pytest" not in sys.modules and os.environ.get("DISABLE_WORKERS", "0") != "1":
-    reconcile_pollers()
+if (
+    "pytest" not in sys.modules
+    and os.environ.get("DISABLE_WORKERS", "0") != "1"
+    and not _is_reloader_parent()
+):
+    start_background_services()
 
 
 # =========================================================
-# LIVE VACUUM API
+# LIVE GAUGE STATUS API
 # =========================================================
 @app.route("/api/fixture-live/<int:slave_id>")
+@login_required
 def get_live_vacuum(slave_id):
-    with LOCK:
-        vacuum = MODBUS_CACHE.get(slave_id)
-    if not isinstance(vacuum, (int, float)) or not math.isfinite(vacuum):
-        vacuum = None
-    return jsonify({"vacuum": vacuum})
+    snap = POLLING.gauge_snapshot(g.line.key, slave_id)
+    if snap is None:
+        return jsonify({"error": "Unknown gauge"}), 404
+    # `vacuum` is only a trustworthy current reading (None when stale or
+    # unavailable); `last_value` is the last known value for greyed-out display.
+    snap["vacuum"] = snap["value"]
+    return jsonify(snap)
 
 
 # =========================================================
 # FIXTURE DETAIL API (extended)
 # =========================================================
 @app.route("/api/fixture/<int:slave_id>")
+@login_required
 @db_safe
 def fixture_detail(slave_id):
     conn = get_connection()
@@ -692,10 +824,10 @@ def fixture_detail(slave_id):
             h.start_time,
             h.upper_limit
         FROM pirani_test_header h
-        WHERE h.gauge_id = ?
+        WHERE h.gauge_id = ? AND h.line_name = ?
         ORDER BY h.start_time DESC
     """,
-        (slave_id,),
+        (slave_id, g.line.key),
     )
     row = cur.fetchone()
     conn.close()
@@ -729,195 +861,87 @@ def fixture_detail(slave_id):
 
 
 # =========================================================
-# MODBUS DIAGNOSTICS
+# MODBUS DIAGNOSTICS / WORKER HEALTH (own line only)
 # =========================================================
 @app.route("/api/modbus/diagnostics")
+@login_required
 def modbus_diagnostics():
-    with CONFIG_LOCK:
-        cfg = dict(GAUGE_CONFIG)
-    with LOCK:
-        cache = dict(MODBUS_CACHE)
-
-    gateways = {}
-    for sid, g in cfg.items():
-        if not g["enabled"]:
-            continue
-        key = f"{g['host']}:{g['port']}"
-        gw = gateways.setdefault(key, {
-            "host": g["host"], "port": g["port"],
-            "gauges_polled": 0, "gauges_responding": 0, "readings": {},
-        })
-        v = cache.get(sid)
-        gw["gauges_polled"] += 1
-        if v is not None:
-            gw["gauges_responding"] += 1
-        gw["readings"][sid] = round(v, 3) if v is not None else None
-
-    return jsonify({"gateways": list(gateways.values())})
+    gateways = []
+    for usr in POLLING.line_snapshot(g.line.key):
+        gauges = usr["gauges"]
+        usr["gauges_polled"] = len(gauges)
+        usr["gauges_responding"] = sum(1 for gs in gauges.values() if gs["freshness"] == "valid")
+        usr["readings"] = {
+            sid: round(gs["value"], 3) if gs["value"] is not None else None
+            for sid, gs in gauges.items()
+        }
+        gateways.append(usr)
+    return jsonify({"gateways": gateways, "polling_mode": SETTINGS.polling_mode})
 
 
 # =========================================================
-# LINE / GAUGE SETTINGS API
+# LINE CONFIGURATION (read-only — it lives in .env)
 # =========================================================
-LINE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,50}$")
+def _line_settings_payload(line):
+    return {
+        "line_key": line.key,
+        "line_label": line.label,
+        "gap": line.gap,
+        "reading_delay_sec": line.reading_delay_sec,
+        "upper_limit": line.upper_limit,
+        "poll_interval_sec": line.poll_interval_sec,
+        "min_duration_sec": line.min_duration_sec,
+        "register_map": line.register_map,
+        "polling_mode": SETTINGS.polling_mode,
+        "polled_here": POLLING.polled_here(line.key),
+        "network": {
+            "subnet": line.subnet,
+            "pc_ip": line.pc_line_ip,
+            "router_ip": line.router_ip,
+            "company_pc_ip": line.company_pc_ip,
+        },
+        "hosts": [
+            {
+                "usr_id": gw.usr_id,
+                "enabled": gw.enabled,
+                "host": gw.host,
+                "port": gw.port,
+                "first_gauge": gw.first,
+                "last_gauge": gw.last,
+                "gauges": [
+                    {
+                        "id": n,
+                        "name": f"Gauge {n}",
+                        "slave_id": n,
+                        "enabled": n not in line.disabled_gauges,
+                    }
+                    for n in gw.gauge_numbers
+                ],
+            }
+            for gw in line.gateways
+        ],
+    }
 
 
 @app.route("/api/settings/lines", methods=["GET"])
-@db_safe
+@login_required
 def settings_lines():
-    rows = get_gauge_config_rows()
-    lines = {}
-    for r in rows:
-        line = lines.setdefault(r["line_key"], {
-            "line_key": r["line_key"],
-            "line_label": r["line_label"],
-            "gap": r["gap"] or 0,
-            "reading_delay_sec": r["reading_delay_sec"] or 0,
-            "upper_limit": r["upper_limit"] or 0,
-            "poll_interval_sec": r["poll_interval_sec"] or 60,
-            "min_duration_sec": r["min_duration_sec"] if r["min_duration_sec"] is not None else 600,
-            "hosts": {},
-        })
-        host = line["hosts"].setdefault((r["host"], r["port"]), {
-            "host": r["host"],
-            "port": r["port"],
-            "gauges": [],
-        })
-        host["gauges"].append({
-            "id": r["id"],
-            "name": r["gauge_name"],
-            "slave_id": r["slave_id"],
-            "enabled": bool(r["enabled"]),
-        })
-
-    return jsonify([
-        {**line, "hosts": list(line["hosts"].values())} for line in lines.values()
-    ])
+    # Only the logged-in line — never another line's USRs or settings.
+    return jsonify([_line_settings_payload(g.line)])
 
 
-@app.route("/api/settings/lines", methods=["POST"])
-@db_safe
-def save_line_config():
-    d = request.json or {}
-    line_key = (d.get("line_key") or "").strip()
-    line_label = (d.get("line_label") or "").strip()
-    hosts = d.get("hosts") or []
-    gap = d.get("gap", 0) or 0
-    reading_delay_sec = d.get("reading_delay_sec", 0) or 0
-    upper_limit = d.get("upper_limit", 0) or 0
-    poll_interval_sec = d.get("poll_interval_sec", 60) or 60
-    min_duration_sec = d.get("min_duration_sec", 600)
-    if min_duration_sec is None:
-        min_duration_sec = 600
-
-    if not LINE_KEY_RE.match(line_key):
-        return jsonify({"error": "line_key must be 1-50 chars of letters/digits/_/-"}), 400
-    if not line_label:
-        return jsonify({"error": "line_label is required"}), 400
-    if not isinstance(gap, int) or isinstance(gap, bool) or not (0 <= gap <= 500):
-        return jsonify({"error": "gap must be an integer between 0 and 500"}), 400
-    if (
-        not isinstance(reading_delay_sec, int)
-        or isinstance(reading_delay_sec, bool)
-        or not (0 <= reading_delay_sec <= 3600)
-    ):
-        return jsonify({"error": "reading_delay_sec must be an integer between 0 and 3600"}), 400
-    if (
-        not isinstance(upper_limit, (int, float))
-        or isinstance(upper_limit, bool)
-        or upper_limit < 0
-    ):
-        return jsonify({"error": "upper_limit must be a non-negative number"}), 400
-    if (
-        not isinstance(poll_interval_sec, int)
-        or isinstance(poll_interval_sec, bool)
-        or not (60 <= poll_interval_sec <= 3600)
-    ):
-        return jsonify({"error": "poll_interval_sec must be an integer between 60 and 3600"}), 400
-    if (
-        not isinstance(min_duration_sec, int)
-        or isinstance(min_duration_sec, bool)
-        or not (0 <= min_duration_sec <= 3600)
-    ):
-        return jsonify({"error": "min_duration_sec must be an integer between 0 and 3600"}), 400
-
-    all_slave_ids = []
-    for h in hosts:
-        host, port = (h.get("host") or "").strip(), h.get("port")
-        if not host or not isinstance(port, int) or not (1 <= port <= 65535):
-            return jsonify({"error": f"Invalid host/port: {h}"}), 400
-        for g in h.get("gauges", []):
-            sid = g.get("slave_id")
-            if not isinstance(sid, int) or not (1 <= sid <= 247):
-                return jsonify({"error": f"Invalid slave_id: {sid}"}), 400
-            if not (g.get("name") or "").strip():
-                return jsonify({"error": f"Gauge name required for slave_id {sid}"}), 400
-            all_slave_ids.append(sid)
-
-    if len(all_slave_ids) != len(set(all_slave_ids)):
-        return jsonify({"error": "Duplicate slave_id within this line's submission"}), 400
-
-    conflicts = get_conflicting_slave_ids(line_key, all_slave_ids)
-    if conflicts:
-        return jsonify({
-            "error": "slave_id already used by another line",
-            "conflicts": [{"slave_id": sid, "line_key": lk} for sid, lk in conflicts],
-        }), 409
-
-    # Don't let a save yank config out from under an active test.
-    existing = [r for r in get_gauge_config_rows() if r["line_key"] == line_key]
-    old_enabled = {r["slave_id"] for r in existing if r["enabled"]}
-    new_enabled = {
-        g["slave_id"] for h in hosts for g in h.get("gauges", []) if g.get("enabled")
-    }
-    at_risk = (old_enabled - new_enabled) & set(get_active_tests())
-    if at_risk:
-        return jsonify({
-            "error": "Cannot save: gauge(s) have an active test running",
-            "gauge_ids": sorted(at_risk),
-        }), 409
-
-    replace_line_gauge_config(
-        line_key, line_label, hosts, gap, reading_delay_sec, upper_limit, poll_interval_sec,
-        min_duration_sec,
-    )
-    _apply_gauge_config_change()
-    return jsonify({"success": True})
+def _host_has_active_test(line, gateway):
+    """True if any gauge behind this gateway has a test running right now.
+    Guards test-connection from stealing the TCP connection out from under a
+    real test on gateways that only support one connection at a time (common
+    with cheap Modbus TCP-to-RTU gateways)."""
+    return bool(set(gateway.gauge_numbers) & set(get_active_tests(line.key)))
 
 
-@app.route("/api/settings/lines/<line_key>", methods=["DELETE"])
-@db_safe
-def delete_line_config(line_key):
-    rows = [r for r in get_gauge_config_rows() if r["line_key"] == line_key]
-    at_risk = {r["slave_id"] for r in rows if r["enabled"]} & set(get_active_tests())
-    if at_risk:
-        return jsonify({
-            "error": "Cannot delete: gauge(s) have an active test running",
-            "gauge_ids": sorted(at_risk),
-        }), 409
-
-    delete_line_gauge_config(line_key)
-    _apply_gauge_config_change()
-    return jsonify({"success": True})
-
-
-def _host_has_active_test(host, port):
-    """True if any gauge on this (host, port) — per the SAVED config — has a
-    test running right now. Guards test-connection from stealing the TCP
-    connection out from under a real test on gateways that only support one
-    connection at a time (common with cheap Modbus TCP-to-RTU gateways)."""
-    with CONFIG_LOCK:
-        host_slave_ids = {
-            sid for sid, g in GAUGE_CONFIG.items() if g["host"] == host and g["port"] == port
-        }
-    return bool(host_slave_ids & set(get_active_tests()))
-
-
-def _test_modbus_connection(host, port, slave_ids, timeout=3):
-    """One-shot connectivity check, independent of the persistent poller
-    threads. Connects, then (if any slave_ids given) reads a register from
-    each to confirm the gauges themselves respond, not just the gateway TCP
-    port."""
+def _test_modbus_connection(host, port, slave_ids, reg_map, timeout=3):
+    """One-shot connectivity check, independent of the polling workers.
+    Connects, then (if any slave_ids given) reads each gauge to confirm the
+    gauges themselves respond, not just the gateway's TCP port."""
     client = ModbusTcpClient(host=host, port=port, timeout=timeout)
     try:
         if not client.connect():
@@ -925,19 +949,15 @@ def _test_modbus_connection(host, port, slave_ids, timeout=3):
 
         gauges = []
         for sid in slave_ids:
-            try:
-                rr = client.read_holding_registers(address=3, count=2, unit=sid)
-                if rr and not rr.isError():
-                    value = rr.registers[1] / 1000
-                    gauges.append({
-                        "slave_id": sid, "responding": True,
-                        "value": round(value, 3) if math.isfinite(value) else None,
-                    })
-                else:
-                    gauges.append({"slave_id": sid, "responding": False, "value": None})
-            except Exception:
-                gauges.append({"slave_id": sid, "responding": False, "value": None})
-
+            r = read_gauge(client, sid, reg_map)
+            gauges.append(
+                {
+                    "slave_id": sid,
+                    "responding": r.status == SUCCESS,
+                    "value": round(r.value, 3) if r.value is not None else None,
+                    "communication_status": r.status,
+                }
+            )
         return {"reachable": True, "error": None, "gauges": gauges}
     except Exception as e:
         return {"reachable": False, "error": str(e), "gauges": []}
@@ -949,8 +969,11 @@ def _test_modbus_connection(host, port, slave_ids, timeout=3):
 
 
 @app.route("/api/settings/test-connection", methods=["POST"])
+@login_required
+@admin_required
 def test_connection_route():
-    d = request.json or {}
+    line = g.line
+    d = request.get_json(silent=True) or {}
     host = (d.get("host") or "").strip()
     port = d.get("port")
     slave_ids = d.get("slave_ids") or []
@@ -962,22 +985,40 @@ def test_connection_route():
     ):
         return jsonify({"error": "slave_ids must be a list of integers"}), 400
 
-    if _host_has_active_test(host, port):
+    # Only this line's own USRs may be probed — this endpoint must not be
+    # usable to connect to arbitrary hosts.
+    gateway = next((gw for gw in line.gateways if gw.host == host and gw.port == port), None)
+    if gateway is None:
+        return jsonify({"error": "Not a gateway of your line"}), 403
+    if any(s not in gateway.gauge_numbers for s in slave_ids):
+        return jsonify({"error": "slave_ids must belong to this gateway"}), 400
+
+    if not POLLING.polled_here(line.key):
+        return jsonify({
+            "error": f"{line.label} is not reachable from this PC "
+                     f"(polling mode: {SETTINGS.polling_mode}) — run the test on the line PC",
+        }), 409
+
+    if _host_has_active_test(line, gateway):
         return jsonify({
             "error": "Cannot test — an active test is currently using this gateway",
         }), 409
 
-    result = _test_modbus_connection(host, port, slave_ids)
-    return jsonify(result)
+    return jsonify(_test_modbus_connection(host, port, slave_ids, REGISTER_MAPS[line.register_map]))
 
 
 # =========================================================
 # REPORTS API
 # =========================================================
 @app.route("/api/reports")
+@login_required
 @db_safe
 def reports_api():
-    cache_key = tuple(sorted(request.args.items()))
+    line = g.line
+
+    # The line is part of the cache key: two lines can send identical query
+    # strings, and must never be served each other's cached rows.
+    cache_key = (line.key,) + tuple(sorted(request.args.items()))
     if cache_key in REPORT_CACHE and request.args.get("export") != "excel":
         return jsonify(REPORT_CACHE[cache_key])
 
@@ -986,7 +1027,6 @@ def reports_api():
     end = request.args.get("end")
     model = request.args.get("model")
     result = request.args.get("result")
-    line = request.args.get("line")
     gauge = request.args.get("gauge", type=int)
 
     base_query = """
@@ -1010,11 +1050,13 @@ def reports_api():
             ORDER BY log_time DESC
         ) l
     """
-    params = []
+    # Always restricted to the logged-in line; a `line` query parameter from
+    # the client is ignored.
+    params = [line.key]
 
     if limit:
         query = (
-            base_query + " ORDER BY h.start_time DESC "
+            base_query + " WHERE h.line_name = ? ORDER BY h.start_time DESC "
             "OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"
         )
         params.append(limit)
@@ -1023,7 +1065,10 @@ def reports_api():
             return jsonify([])
 
         # Use CAST so the full end-date is included
-        query = base_query + " WHERE CAST(h.start_time AS DATE) BETWEEN ? AND ?"
+        query = (
+            base_query
+            + " WHERE h.line_name = ? AND CAST(h.start_time AS DATE) BETWEEN ? AND ?"
+        )
         params.extend([start, end])
 
         if model:
@@ -1032,9 +1077,6 @@ def reports_api():
         if result:
             query += " AND h.final_result = ?"
             params.append(result)
-        if line:
-            query += " AND h.line_name = ?"
-            params.append(line)
         if gauge:
             query += " AND h.gauge_id = ?"
             params.append(gauge)
@@ -1096,18 +1138,21 @@ def reports_api():
 # REPORT TREND API  (UUID-safe — was incorrectly int:)
 # =========================================================
 @app.route("/api/report/<string:test_id>/trend")
+@login_required
 @db_safe
 def report_trend(test_id):
     conn = get_connection()
     cur = conn.cursor()
+    # Joined to the header so a test of another line reads as "no readings".
     cur.execute(
         """
-        SELECT log_time, vacuum, result
-        FROM pirani_test_log
-        WHERE test_id = ?
-        ORDER BY log_time
+        SELECT l.log_time, l.vacuum, l.result
+        FROM pirani_test_log l
+        JOIN pirani_test_header h ON h.test_id = l.test_id
+        WHERE l.test_id = ? AND h.line_name = ?
+        ORDER BY l.log_time
     """,
-        (test_id,),
+        (test_id, g.line.key),
     )
     rows = cur.fetchall()
     conn.close()
@@ -1271,6 +1316,7 @@ def _trend_chart_drawing(readings, ul, width=480, height=190):
 
 
 @app.route("/api/report/<string:test_id>/pdf")
+@login_required
 @db_safe
 def report_pdf(test_id):
     conn = get_connection()
@@ -1282,9 +1328,9 @@ def report_pdf(test_id):
                h.line_name, h.final_result, h.start_time, h.end_time,
                h.upper_limit AS ul
         FROM pirani_test_header h
-        WHERE h.test_id = ?
+        WHERE h.test_id = ? AND h.line_name = ?
     """,
-        (test_id,),
+        (test_id, g.line.key),
     )
     header_row = cur.fetchone()
     if not header_row:

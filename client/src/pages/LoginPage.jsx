@@ -1,47 +1,61 @@
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate } from "react-router-dom";
-import { FiUser, FiShield, FiCheckCircle, FiLogIn, FiActivity } from "react-icons/fi";
+import { Navigate, useNavigate } from "react-router-dom";
+import { FiUser, FiLock, FiLogIn } from "react-icons/fi";
 import toast from "react-hot-toast";
-import { CREDENTIALS } from "../config/credentials";
-import { selectLineOptions, selectLinesStatus } from "../store/linesSlice";
+import { login as loginApi } from "../api/client";
 import { login } from "../store/authSlice";
 
+// Each production line has its own username/password, defined in the server's
+// .env. The backend checks them and tells us which line they belong to — the
+// browser never sees any other line's credentials.
 export default function LoginPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const isAuthenticated = useSelector((s) => s.auth.isAuthenticated);
-  const lines = useSelector(selectLineOptions);
-  const linesStatus = useSelector(selectLinesStatus);
 
-  const [selectedCred, setSelectedCred] = useState(null);
-  const [selectedLine, setSelectedLine] = useState(null);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
-  if (isAuthenticated) {
-    navigate("/", { replace: true });
-    return null;
-  }
+  if (isAuthenticated) return <Navigate to="/" replace />; // RequireAuth sends us on to /select-line if needed
 
-  const handleLogin = () => {
-    if (!selectedCred) return toast.error("Select who you are logging in as");
-    if (!selectedLine) return toast.error("Select a conveyor line");
-
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!username.trim() || !password) {
+      setError("Enter your username and password");
+      return;
+    }
     setSubmitting(true);
-    dispatch(
-      login({
-        username: selectedCred.username,
-        role: selectedCred.role,
-        line: selectedLine.key,
-      })
-    );
-    toast.success(`Welcome, ${selectedCred.username} — ${selectedLine.label} line`);
-    navigate("/", { replace: true });
+    setError(null);
+    try {
+      const me = await loginApi(username.trim(), password);
+      dispatch(login({ username: me.username, role: me.role, line: me.line, lines: me.lines }));
+      if (me.needs_line_selection) {
+        // Authorised for several lines: choose which one to work on.
+        navigate("/select-line", { replace: true });
+      } else {
+        toast.success(`Welcome — ${me.line_label} line`);
+        navigate("/", { replace: true });
+      }
+    } catch (err) {
+      setError(err.message || "Could not sign in — check the server connection");
+      setPassword("");
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const inputClass =
+    "w-full pl-10 pr-3 py-3 rounded-xl border-2 border-slate-200 focus:border-emerald-600 outline-none text-base";
 
   return (
     <div className="min-h-screen bg-ink-950 flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-8">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8"
+      >
         <div className="flex items-center gap-2.5 justify-center mb-1">
           <img src="/western-logo.jpg" alt="Western Refrigeration" className="h-12 w-auto rounded-sm" />
           <span className="w-2.5 h-2.5 rounded-full bg-signal-pass shadow-[0_0_10px_2px_rgba(34,197,94,0.7)]" />
@@ -49,89 +63,54 @@ export default function LoginPage() {
             PIRANI<span className="text-signal-pass"> GAUGE DASHBOARD</span>
           </span>
         </div>
-        <p className="text-center text-sm text-slate-400 mb-8">Sign in to continue</p>
+        <p className="text-center text-sm text-slate-400 mb-8">
+          Sign in with your production line login
+        </p>
 
-        {/* Step 1: who's logging in */}
-        <div className="mb-7">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-            <FiUser /> 1. Select your login
-          </h3>
-          <div className="grid grid-cols-2 gap-3">
-            {CREDENTIALS.map((c) => {
-              const active = selectedCred?.username === c.username;
-              return (
-                <button
-                  key={c.username}
-                  type="button"
-                  onClick={() => setSelectedCred(c)}
-                  className={`relative text-left p-4 rounded-xl border-2 transition ${
-                    active
-                      ? "border-emerald-600 bg-emerald-50"
-                      : "border-slate-200 hover:border-emerald-300 hover:bg-slate-50"
-                  }`}
-                >
-                  {active && <FiCheckCircle className="absolute top-3 right-3 text-emerald-600" />}
-                  <div className="flex items-center gap-2 font-semibold text-slate-800 capitalize">
-                    <FiShield className="text-slate-400" />
-                    {c.username}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1">{c.role}</div>
-                </button>
-              );
-            })}
-          </div>
+        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          Username
+        </label>
+        <div className="relative mb-4">
+          <FiUser className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+            autoComplete="username"
+            autoCapitalize="none"
+            className={inputClass}
+          />
         </div>
 
-        {/* Step 2: which line */}
-        <div className="mb-8">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-            <FiActivity /> 2. Select conveyor line
-          </h3>
-          {linesStatus === "loading" && (
-            <p className="text-sm text-slate-400">Loading lines…</p>
-          )}
-          {linesStatus === "failed" && (
-            <p className="text-sm text-rose-500">
-              Could not load lines — check the server connection.
-            </p>
-          )}
-          {linesStatus === "succeeded" && lines.length === 0 && (
-            <p className="text-sm text-slate-400">
-              No lines configured yet — ask an admin to set one up in Settings.
-            </p>
-          )}
-          <div className="grid grid-cols-3 gap-3">
-            {lines.map((l) => {
-              const active = selectedLine?.key === l.key;
-              return (
-                <button
-                  key={l.key}
-                  type="button"
-                  onClick={() => setSelectedLine(l)}
-                  className={`relative text-center p-4 rounded-xl border-2 transition ${
-                    active
-                      ? "border-emerald-600 bg-emerald-50"
-                      : "border-slate-200 hover:border-emerald-300 hover:bg-slate-50"
-                  }`}
-                >
-                  {active && <FiCheckCircle className="absolute top-2 right-2 text-emerald-600" />}
-                  <div className="font-semibold text-slate-800">{l.label}</div>
-                  <div className="text-xs text-slate-400 mt-1 tabular">{l.gaugeCount} gauges</div>
-                </button>
-              );
-            })}
-          </div>
+        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          Password
+        </label>
+        <div className="relative mb-4">
+          <FiLock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            className={inputClass}
+          />
         </div>
+
+        {error && (
+          <p role="alert" className="text-sm text-rose-600 mb-4">
+            {error}
+          </p>
+        )}
 
         <button
-          type="button"
-          onClick={handleLogin}
+          type="submit"
           disabled={submitting}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-base transition"
         >
-          <FiLogIn /> Login
+          <FiLogIn /> {submitting ? "Signing in…" : "Login"}
         </button>
-      </div>
+      </form>
     </div>
   );
 }

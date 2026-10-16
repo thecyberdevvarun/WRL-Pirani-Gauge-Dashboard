@@ -1,3 +1,4 @@
+import threading
 import time
 
 import test_runner as tr
@@ -31,11 +32,12 @@ def test_reading_delay_blocks_first_log(monkeypatch):
     """reading_delay_sec must delay the first logged reading by roughly that
     many seconds, without needing a real Modbus gateway or database."""
     events = []
+    finished = threading.Event()
 
     monkeypatch.setattr(tr, "ModbusTcpClient", _FakeModbusClient)
     monkeypatch.setattr(tr, "create_test_header", lambda *a, **k: "fake-test-id")
     monkeypatch.setattr(tr, "log_reading", lambda *a, **k: events.append(time.time()))
-    monkeypatch.setattr(tr, "close_test_header", lambda *a, **k: None)
+    monkeypatch.setattr(tr, "close_test_header", lambda *a, **k: finished.set())
 
     start = time.time()
     result = tr.run_test(
@@ -52,17 +54,21 @@ def test_reading_delay_blocks_first_log(monkeypatch):
         assert events, "expected at least one log_reading call before the deadline"
         assert events[0] - start >= 0.9  # ~1s delay, small slack for scheduling
     finally:
-        tr.stop_test(42, manual=True)
+        tr.stop_test("LINE", 42, manual=True)
+        # Let the background thread finish while this test's patches are still
+        # active, so it can't call into the next test's patched functions.
+        assert finished.wait(3)
 
 
 def test_zero_reading_delay_logs_immediately(monkeypatch):
     """reading_delay_sec=0 (the default) should not introduce any wait."""
     events = []
+    finished = threading.Event()
 
     monkeypatch.setattr(tr, "ModbusTcpClient", _FakeModbusClient)
     monkeypatch.setattr(tr, "create_test_header", lambda *a, **k: "fake-test-id")
     monkeypatch.setattr(tr, "log_reading", lambda *a, **k: events.append(time.time()))
-    monkeypatch.setattr(tr, "close_test_header", lambda *a, **k: None)
+    monkeypatch.setattr(tr, "close_test_header", lambda *a, **k: finished.set())
 
     start = time.time()
     result = tr.run_test(
@@ -79,7 +85,8 @@ def test_zero_reading_delay_logs_immediately(monkeypatch):
         assert events, "expected at least one log_reading call before the deadline"
         assert events[0] - start < 0.5
     finally:
-        tr.stop_test(43, manual=True)
+        tr.stop_test("LINE", 43, manual=True)
+        assert finished.wait(3)
 
 
 def _run_to_one_reading_then_stop(monkeypatch, slave_id, upper_limit):
@@ -107,7 +114,7 @@ def _run_to_one_reading_then_stop(monkeypatch, slave_id, upper_limit):
         time.sleep(0.05)
     assert logged, "expected at least one reading before stopping"
 
-    tr.stop_test(slave_id, manual=False)
+    tr.stop_test("LINE", slave_id, manual=False)
 
     deadline = time.time() + 2
     while "result" not in closed and time.time() < deadline:
@@ -150,7 +157,7 @@ def test_auto_stop_deferred_until_min_duration(monkeypatch):
     assert result["status"] == "STARTED"
 
     # Request an auto-stop almost immediately — well before min_duration_sec.
-    tr.stop_test(46, manual=False)
+    tr.stop_test("LINE", 46, manual=False)
 
     time.sleep(0.4)
     assert "result" not in closed, "auto-stop should have been deferred, not applied immediately"
@@ -180,7 +187,7 @@ def test_manual_stop_overrides_min_duration(monkeypatch):
     assert result["status"] == "STARTED"
 
     start = time.time()
-    tr.stop_test(47, manual=True)
+    tr.stop_test("LINE", 47, manual=True)
 
     deadline = time.time() + 2
     while "result" not in closed and time.time() < deadline:
@@ -188,3 +195,43 @@ def test_manual_stop_overrides_min_duration(monkeypatch):
 
     assert closed.get("result") == "ABORTED"
     assert time.time() - start < 1.5  # must not wait anywhere near the 600s min duration
+
+
+def test_same_gauge_number_on_two_lines_does_not_collide(monkeypatch):
+    """Slave IDs are the gauge number *within* a line, so gauge 1 exists on
+    every line. Running gauge 1 on two lines at once must give two independent
+    tests: stopping one must leave the other running, and active-test lists
+    are per line."""
+    closed = {}
+
+    monkeypatch.setattr(tr, "ModbusTcpClient", _FakeModbusClient)
+    monkeypatch.setattr(tr, "create_test_header", lambda serial, model, name, line, gauge, ul: f"{line}-{gauge}")
+    monkeypatch.setattr(tr, "log_reading", lambda *a, **k: None)
+    monkeypatch.setattr(tr, "close_test_header", lambda test_id, result: closed.update({test_id: result}))
+
+    for line in ("COLLIDE_A", "COLLIDE_B"):
+        res = tr.run_test("S", "M1", "Model", line, 1, "10.0.0.1", 502, upper_limit=1.0, poll_interval_sec=5)
+        assert res["status"] == "STARTED"
+
+    try:
+        assert tr.get_active_tests("COLLIDE_A") == [1]
+        assert tr.get_active_tests("COLLIDE_B") == [1]
+
+        # Stopping gauge 1 on line A must not touch gauge 1 on line B.
+        assert tr.stop_test("COLLIDE_A", 1, manual=True) is True
+        deadline = time.time() + 2
+        while "COLLIDE_A-1" not in closed and time.time() < deadline:
+            time.sleep(0.02)
+
+        assert closed.get("COLLIDE_A-1") == "ABORTED"
+        assert "COLLIDE_B-1" not in closed
+        assert tr.get_active_tests("COLLIDE_A") == []
+        assert tr.get_active_tests("COLLIDE_B") == [1]
+
+        # A line with nothing running reports nothing, and can't stop another line's gauge.
+        assert tr.stop_test("COLLIDE_C", 1, manual=True) is False
+    finally:
+        tr.stop_test("COLLIDE_B", 1, manual=True)
+        deadline = time.time() + 2
+        while "COLLIDE_B-1" not in closed and time.time() < deadline:
+            time.sleep(0.02)

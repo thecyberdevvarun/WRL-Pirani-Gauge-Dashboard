@@ -27,8 +27,8 @@ function lerp(a, b, t) {
 
 /** Animates a small dot forward around the ring (increasing index, wrapping)
  * from the IN gauge's point to its configured exit point, looping
- * continuously — matching auto_stop_cycle_gauge in app.py, which stops
- * only the gauge exactly `gap` positions ahead of the scanned-in gauge. This is a decorative
+ * continuously — matching auto_stop_cycle_gauge in app.py, which now sweeps
+ * the `gap` positions ahead of the scanned-in gauge. This is a decorative
  * approximation — there's no real position sensor feeding this, so it's
  * paced by a fixed animation speed, not actual elapsed/remaining test time. */
 function TravelingMarker({
@@ -111,6 +111,9 @@ export default function ConveyorTrack({
 }) {
   const pathRef = useRef(null);
   const [points, setPoints] = useState([]);
+  // Diameter (px) of each gauge circle. Shrinks as the line gets longer so a
+  // 54-gauge line still fits around the ring without circles overlapping.
+  const [nodeSize, setNodeSize] = useState(40);
   const gaugeCount = gaugeIds.length;
 
   // Compute positions ON the curved rectangle
@@ -132,6 +135,8 @@ export default function ConveyorTrack({
     }
 
     setPoints(newPoints);
+    const spacing = length / gaugeCount;
+    setNodeSize(Math.max(18, Math.min(44, Math.floor(spacing * 0.82))));
   }, [gaugeCount]);
 
   // Map slave_id -> its position index in gaugeIds, since gauges may not
@@ -146,7 +151,7 @@ export default function ConveyorTrack({
       <section className="relative bg-white border rounded-xl shadow w-full aspect-16/10 flex items-center justify-center">
         <div className="text-center text-slate-400">
           <FiActivity className="mx-auto text-4xl mb-3" />
-          <p>Please select a line</p>
+          <p>No gauges to show for this line</p>
         </div>
       </section>
     );
@@ -214,12 +219,14 @@ export default function ConveyorTrack({
               onClick={() => onSelect(f.slave_id)}
               title={`Gauge ${f.slave_id}`}
               className={`absolute flex items-center justify-center rounded-full font-bold shadow
-                w-[clamp(28px,4vw,44px)] h-[clamp(28px,4vw,44px)]
                 ${COLOR_MAP[f.color] || COLOR_MAP.gray}
               `}
               style={{
                 left: pt.x,
                 top: pt.y,
+                width: nodeSize,
+                height: nodeSize,
+                fontSize: Math.max(9, Math.round(nodeSize * 0.36)),
                 transform: "translate(-50%, -50%)",
               }}
             >

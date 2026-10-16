@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useSelector } from "react-redux";
 import ReportFilters from "../components/ReportFilters";
 import ReportSummary from "../components/ReportSummary";
 import ReportTable from "../components/ReportTable";
@@ -12,13 +11,10 @@ function toISODate(d) {
 const today = toISODate(new Date());
 
 export default function ReportsPage() {
-  const sessionLine = useSelector((s) => s.auth.line);
-
   const [filters, setFilters] = useState({
     start: today,
     end: today,
     model: "",
-    line: sessionLine || "",
     gauge: "",
     result: "",
   });

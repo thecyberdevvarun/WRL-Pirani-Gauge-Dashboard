@@ -7,6 +7,7 @@ import {
 } from "../api/client";
 import { toast } from "react-hot-toast";
 import LiveVacuumChart from "./LiveVacuumChart";
+import GaugeDeviceStatus from "./GaugeDeviceStatus";
 
 const STATUS_TEXT_COLOR = {
   PASS: "text-signal-pass",
@@ -29,6 +30,7 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
   // using react-hot-toast
   const [detail, setDetail] = useState(null);
   const [liveValue, setLiveValue] = useState(null);
+  const [live, setLive] = useState(null); // full live status: USR, connection, freshness, errors
   const [chartData, setChartData] = useState([]);
   const [elapsed, setElapsed] = useState(null);
   const tickRef = useRef(0);
@@ -37,6 +39,7 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
   useEffect(() => {
     if (!gaugeId) return;
     setDetail(null);
+    setLive(null);
     setChartData([]);
     tickRef.current = 0;
     getFixtureDetail(gaugeId)
@@ -65,7 +68,11 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
     const poll = () => {
       getLiveVacuum(gaugeId)
         .then((d) => {
-          const v = Number(d.vacuum);
+          setLive(d);
+          // The server sends vacuum = null when there is no current reading
+          // (stale, never read, USR down). Number(null) is 0, so check for
+          // null first or a missing reading would show and chart as 0.000.
+          const v = d.vacuum === null || d.vacuum === undefined ? NaN : Number(d.vacuum);
           if (!Number.isFinite(v)) {
             setLiveValue(null);
             return;
@@ -79,7 +86,10 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
               : next;
           });
         })
-        .catch(() => setLiveValue(null));
+        .catch(() => {
+          setLiveValue(null);
+          setLive(null);
+        });
     };
     poll();
     const t = setInterval(poll, 1500);
@@ -174,10 +184,17 @@ export default function DetailPanel({ gaugeId, fixture, onStopped }) {
             <b className="text-emerald-700 text-base tabular">
               {liveValue !== null ? liveValue.toFixed(3) : "—"}
             </b>{" "}
-            <span className="text-xs text-slate-400">mbar</span>
+            <span className="text-xs text-slate-400">{live?.unit || "mbar"}</span>
+            {liveValue === null && live?.last_value != null && (
+              <span className="ml-2 text-xs text-amber-600">
+                last known {Number(live.last_value).toFixed(3)} (stale)
+              </span>
+            )}
           </div>
 
           <LiveVacuumChart data={chartData} ul={detail.ul} />
+
+          <GaugeDeviceStatus live={live} />
 
           <div className="text-xs mt-2 text-slate-500 tabular">
             Upper Limit: <b>{detail.ul ?? "—"}</b> mbar

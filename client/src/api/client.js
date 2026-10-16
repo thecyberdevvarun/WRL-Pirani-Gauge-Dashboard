@@ -6,16 +6,32 @@
 // bundle from the same Flask host, so these relative paths keep working.
 // ---------------------------------------------------------------------------
 
+// Fired when the server says the session is gone (expired, or the line was
+// removed from .env). App.jsx listens and sends the user back to the login page.
+export const UNAUTHORIZED_EVENT = "pirani:unauthorized";
+// Fired when the server has no production line selected for this session.
+export const SELECT_LINE_EVENT = "pirani:select-line";
+
 async function request(url, options = {}) {
+  const { skipAuthRedirect, ...fetchOptions } = options;
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(fetchOptions.headers || {}),
+    },
+    ...fetchOptions,
   });
+  if (res.status === 401 && !skipAuthRedirect) {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
     try {
       const body = await res.json();
       message = body.error || body.message || message;
+      if (res.status === 409 && body.code === "line_not_selected") {
+        window.dispatchEvent(new Event(SELECT_LINE_EVENT));
+      }
     } catch {
       /* response wasn't JSON */
     }
@@ -23,6 +39,22 @@ async function request(url, options = {}) {
   }
   return res.json();
 }
+
+// ---- Auth (credentials are checked by the backend against .env) ----
+export const login = (username, password) =>
+  request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+    skipAuthRedirect: true, // a wrong password is a form error, not a lost session
+  });
+export const logout = () =>
+  request("/api/auth/logout", { method: "POST", skipAuthRedirect: true });
+export const getMe = () => request("/api/auth/me");
+export const selectLine = (line) =>
+  request("/api/auth/select-line", {
+    method: "POST",
+    body: JSON.stringify({ line }),
+  });
 
 // ---- Health / stats ----
 export const getHealth = () => request("/api/health");
@@ -37,7 +69,6 @@ export const startTest = (payload) =>
   request("/start-test", { method: "POST", body: JSON.stringify(payload) });
 export const stopTest = (gaugeId) =>
   request(`/stop-test/${gaugeId}`, { method: "POST" });
-export const getActiveTests = () => request("/api/active-tests");
 
 // ---- Fixtures (live floor view) ----
 export const getFixtures = () => request("/api/fixtures");
@@ -46,14 +77,14 @@ export const getLiveVacuum = (slaveId) =>
 export const getFixtureDetail = (slaveId) => request(`/api/fixture/${slaveId}`);
 export const getModbusDiagnostics = () => request("/api/modbus/diagnostics");
 
-// ---- Line / gauge settings ----
+// ---- Line configuration (read-only; lives in the server's .env) ----
+// Returns only the line you are logged into.
 export const getLinesConfig = () => request("/api/settings/lines");
-export const saveLine = (payload) =>
-  request("/api/settings/lines", { method: "POST", body: JSON.stringify(payload) });
-export const deleteLine = (lineKey) =>
-  request(`/api/settings/lines/${encodeURIComponent(lineKey)}`, { method: "DELETE" });
 export const testConnection = (payload) =>
-  request("/api/settings/test-connection", { method: "POST", body: JSON.stringify(payload) });
+  request("/api/settings/test-connection", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
 /** Opens the server-sent events stream of fixture state. Returns the EventSource. */
 export function openFixturesStream(onMessage, onError) {

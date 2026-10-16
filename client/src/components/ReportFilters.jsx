@@ -1,6 +1,6 @@
 import { useSelector } from "react-redux";
 import { FiSearch, FiDownload } from "react-icons/fi";
-import { selectLineOptions } from "../store/linesSlice";
+import { selectLineByKey, selectGaugeIdsForLine } from "../store/linesSlice";
 
 const QUICK_RANGES = [
   { label: "Today", days: 0 },
@@ -16,7 +16,10 @@ export default function ReportFilters({
   onExport,
   onQuickRange,
 }) {
-  const lineOptions = useSelector(selectLineOptions);
+  const sessionLine = useSelector((s) => s.auth.line);
+  const lineConfig = useSelector((s) => selectLineByKey(s, sessionLine));
+  const gaugeIds = useSelector((s) => selectGaugeIdsForLine(s, sessionLine));
+  const maxGauge = gaugeIds.length ? gaugeIds[gaugeIds.length - 1] : undefined;
   const update = (key) => (e) =>
     setFilters((f) => ({ ...f, [key]: e.target.value }));
 
@@ -67,28 +70,23 @@ export default function ReportFilters({
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">Line</label>
-          <select
-            value={filters.line}
-            onChange={update("line")}
-            className="w-full px-3 py-2 border rounded text-sm"
-          >
-            <option value="">All Lines</option>
-            {lineOptions.map((l) => (
-              <option key={l.key} value={l.key}>
-                {l.label}
-              </option>
-            ))}
-          </select>
+          {/* Reports are always limited to the line you are logged into. */}
+          <input
+            type="text"
+            value={lineConfig?.line_label || sessionLine || ""}
+            disabled
+            className="w-full px-3 py-2 border rounded text-sm bg-slate-100 text-slate-500"
+          />
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">Gauge ID</label>
           <input
             type="number"
             min="1"
-            max="64"
+            max={maxGauge}
             value={filters.gauge}
             onChange={update("gauge")}
-            placeholder="1–64"
+            placeholder={maxGauge ? `1–${maxGauge}` : "Gauge"}
             className="w-full px-3 py-2 border rounded text-sm"
           />
         </div>

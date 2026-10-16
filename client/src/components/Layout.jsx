@@ -9,8 +9,9 @@ import {
   FiWifiOff,
   FiLogOut,
   FiUser,
+  FiRepeat,
 } from "react-icons/fi";
-import { getHealth } from "../api/client";
+import { getHealth, logout as logoutApi } from "../api/client";
 import { logout } from "../store/authSlice";
 import { selectLineByKey } from "../store/linesSlice";
 
@@ -24,7 +25,7 @@ export default function Layout() {
   const [online, setOnline] = useState(true);
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { username, role, line } = useSelector((s) => s.auth);
+  const { username, role, line, lines } = useSelector((s) => s.auth);
   const lineConfig = useSelector((s) => selectLineByKey(s, line));
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export default function Layout() {
   }, []);
 
   const handleLogout = () => {
+    logoutApi().catch(() => {}); // end the server session too
     dispatch(logout());
     navigate("/login", { replace: true });
   };
@@ -98,6 +100,17 @@ export default function Layout() {
               <span className="text-slate-500">·</span>
               <span>{lineConfig?.line_label || line || "No line"}</span>
             </span>
+
+            {lines.length > 1 && (
+              <button
+                type="button"
+                onClick={() => navigate("/select-line")}
+                title="Switch production line"
+                className="flex items-center gap-1.5 text-slate-400 hover:text-sky-300 transition-colors"
+              >
+                <FiRepeat /> Switch line
+              </button>
+            )}
 
             <button
               type="button"
