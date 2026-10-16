@@ -27,8 +27,8 @@ function lerp(a, b, t) {
 
 /** Animates a small dot forward around the ring (increasing index, wrapping)
  * from the IN gauge's point to its configured exit point, looping
- * continuously — matching auto_stop_cycle_gauge in app.py, which now sweeps
- * the `gap` positions ahead of the scanned-in gauge. This is a decorative
+ * continuously — matching auto_stop_cycle_gauge in app.py, which stops
+ * only the gauge exactly `gap` positions ahead of the scanned-in gauge. This is a decorative
  * approximation — there's no real position sensor feeding this, so it's
  * paced by a fixed animation speed, not actual elapsed/remaining test time. */
 function TravelingMarker({

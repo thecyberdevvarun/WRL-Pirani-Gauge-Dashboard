@@ -61,7 +61,13 @@ const inputCls = (hasError) =>
       : "border-slate-300 focus:border-emerald-600"
   }`;
 
-export default function LineConfigModal({ open, mode, initial, onClose, onSave }) {
+export default function LineConfigModal({
+  open,
+  mode,
+  initial,
+  onClose,
+  onSave,
+}) {
   const [form, setForm] = useState(EMPTY_FORM());
   const [globalError, setGlobalError] = useState("");
   const [fieldErrors, setFieldErrors] = useState(null); // set only after a failed Save attempt
@@ -121,7 +127,12 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
       hosts: f.hosts.map((h, i) =>
         i !== hIdx
           ? h
-          : { ...h, gauges: h.gauges.map((g, j) => (j === gIdx ? { ...g, ...patch } : g)) }
+          : {
+              ...h,
+              gauges: h.gauges.map((g, j) =>
+                j === gIdx ? { ...g, ...patch } : g,
+              ),
+            },
       ),
     }));
 
@@ -141,8 +152,14 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
       ...f,
       hosts: f.hosts.map((h, i) =>
         i === hIdx
-          ? { ...h, gauges: [...h.gauges, { name: "", slave_id: String(suggested), enabled: true }] }
-          : h
+          ? {
+              ...h,
+              gauges: [
+                ...h.gauges,
+                { name: "", slave_id: String(suggested), enabled: true },
+              ],
+            }
+          : h,
       ),
     }));
   };
@@ -150,14 +167,22 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
     setForm((f) => ({
       ...f,
       hosts: f.hosts.map((h, i) =>
-        i === hIdx ? { ...h, gauges: h.gauges.filter((_, j) => j !== gIdx) } : h
+        i === hIdx
+          ? { ...h, gauges: h.gauges.filter((_, j) => j !== gIdx) }
+          : h,
       ),
     }));
 
   const runQuickAdd = (hIdx, { count, start, prefix }) => {
     const n = parseInt(count, 10);
     const startId = parseInt(start, 10);
-    if (!Number.isInteger(n) || n < 1 || n > 100 || !Number.isInteger(startId) || startId < 1) {
+    if (
+      !Number.isInteger(n) ||
+      n < 1 ||
+      n > 100 ||
+      !Number.isInteger(startId) ||
+      startId < 1
+    ) {
       return;
     }
     const generated = Array.from({ length: n }, (_, i) => ({
@@ -189,12 +214,21 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
 
     setTestResults((r) => ({ ...r, [hIdx]: { status: "testing" } }));
     try {
-      const res = await testConnection({ host: h.host.trim(), port, slave_ids: slaveIds });
+      const res = await testConnection({
+        host: h.host.trim(),
+        port,
+        slave_ids: slaveIds,
+      });
       setTestResults((r) => ({ ...r, [hIdx]: { status: "done", ...res } }));
     } catch (err) {
       setTestResults((r) => ({
         ...r,
-        [hIdx]: { status: "done", reachable: false, error: err.message, gauges: [] },
+        [hIdx]: {
+          status: "done",
+          reachable: false,
+          error: err.message,
+          gauges: [],
+        },
       }));
     }
   };
@@ -213,26 +247,39 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
         : null,
       line_label: !lineLabel ? "Required" : null,
       gap:
-        !Number.isInteger(gapNum) || gapNum < 0 || gapNum > 500 ? "0-500" : null,
+        !Number.isInteger(gapNum) || gapNum < 0 || gapNum > 500
+          ? "0-500"
+          : null,
       reading_delay_sec:
-        !Number.isInteger(readingDelayNum) || readingDelayNum < 0 || readingDelayNum > 3600
+        !Number.isInteger(readingDelayNum) ||
+        readingDelayNum < 0 ||
+        readingDelayNum > 3600
           ? "0-3600"
           : null,
       upper_limit:
-        !Number.isFinite(upperLimitNum) || upperLimitNum < 0 ? "Must be 0 or greater" : null,
+        !Number.isFinite(upperLimitNum) || upperLimitNum < 0
+          ? "Must be 0 or greater"
+          : null,
       poll_interval_sec:
-        !Number.isInteger(pollIntervalNum) || pollIntervalNum < 60 || pollIntervalNum > 3600
+        !Number.isInteger(pollIntervalNum) ||
+        pollIntervalNum < 60 ||
+        pollIntervalNum > 3600
           ? "60-3600"
           : null,
       min_duration_sec:
-        !Number.isInteger(minDurationNum) || minDurationNum < 0 || minDurationNum > 3600
+        !Number.isInteger(minDurationNum) ||
+        minDurationNum < 0 ||
+        minDurationNum > 3600
           ? "0-3600"
           : null,
       hosts: form.hosts.map((h) => {
         const port = Number(h.port);
         return {
           host: !h.host.trim() ? "Required" : null,
-          port: !Number.isInteger(port) || port < 1 || port > 65535 ? "1-65535" : null,
+          port:
+            !Number.isInteger(port) || port < 1 || port > 65535
+              ? "1-65535"
+              : null,
           gauges: h.gauges.map((g) => {
             const sid = Number(g.slave_id);
             return {
@@ -251,10 +298,15 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
     } else if (form.hosts.some((h) => !h.gauges.length)) {
       global = "Every host needs at least one gauge";
     } else {
-      const allSlaveIds = form.hosts.flatMap((h) => h.gauges.map((g) => Number(g.slave_id)));
-      const validIds = allSlaveIds.filter((n) => Number.isInteger(n) && n >= 1 && n <= 247);
+      const allSlaveIds = form.hosts.flatMap((h) =>
+        h.gauges.map((g) => Number(g.slave_id)),
+      );
+      const validIds = allSlaveIds.filter(
+        (n) => Number.isInteger(n) && n >= 1 && n <= 247,
+      );
       if (new Set(validIds).size !== validIds.length) {
-        global = "Duplicate slave ID within this line — slave IDs must be unique";
+        global =
+          "Duplicate slave ID within this line — slave IDs must be unique";
       }
     }
 
@@ -266,7 +318,9 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
       errors.upper_limit ||
       errors.poll_interval_sec ||
       errors.min_duration_sec ||
-      errors.hosts.some((h) => h.host || h.port || h.gauges.some((g) => g.name || g.slave_id));
+      errors.hosts.some(
+        (h) => h.host || h.port || h.gauges.some((g) => g.name || g.slave_id),
+      );
 
     return { errors, global, valid: !hasFieldError && !global };
   };
@@ -315,7 +369,8 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               {titles[mode]}
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              {form.hosts.length} host{form.hosts.length === 1 ? "" : "s"} · {totalGauges} gauge
+              {form.hosts.length} host{form.hosts.length === 1 ? "" : "s"} ·{" "}
+              {totalGauges} gauge
               {totalGauges === 1 ? "" : "s"}
             </p>
           </div>
@@ -338,13 +393,17 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               </label>
               <input
                 value={form.line_key}
-                onChange={(e) => setForm((f) => ({ ...f, line_key: e.target.value }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, line_key: e.target.value }))
+                }
                 disabled={mode === "edit"}
                 placeholder="e.g. VISI_COOLER"
                 className={`${inputCls(fieldErrors?.line_key)} disabled:opacity-60 disabled:bg-slate-50`}
               />
               {fieldErrors?.line_key && (
-                <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.line_key}</p>
+                <p className="text-[11px] text-rose-500 mt-1">
+                  {fieldErrors.line_key}
+                </p>
               )}
             </div>
             <div>
@@ -353,12 +412,16 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               </label>
               <input
                 value={form.line_label}
-                onChange={(e) => setForm((f) => ({ ...f, line_label: e.target.value }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, line_label: e.target.value }))
+                }
                 placeholder="e.g. Visi Cooler"
                 className={inputCls(fieldErrors?.line_label)}
               />
               {fieldErrors?.line_label && (
-                <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.line_label}</p>
+                <p className="text-[11px] text-rose-500 mt-1">
+                  {fieldErrors.line_label}
+                </p>
               )}
             </div>
           </div>
@@ -368,23 +431,30 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               <FiTarget className="text-emerald-600" /> Pass/Fail Limit
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              The single common Upper Limit every test on this line is judged against — a reading
-              above this fails, at or below it passes (no lower limit). Leave at 0 until you set a
-              real value; every test will fail until you do, rather than silently passing everything.
+              The single common Upper Limit every test on this line is judged
+              against — a reading above this fails, at or below it passes (no
+              lower limit). Leave at 0 until you set a real value; every test
+              will fail until you do, rather than silently passing everything.
             </p>
             <div className="flex items-end gap-4 flex-wrap">
               <div>
-                <label className="block mb-1 text-[11px] text-slate-500">Upper Limit (mbar)</label>
+                <label className="block mb-1 text-[11px] text-slate-500">
+                  Upper Limit (mbar)
+                </label>
                 <input
                   type="number"
                   step="0.001"
                   min="0"
                   value={form.upper_limit}
-                  onChange={(e) => setForm((f) => ({ ...f, upper_limit: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, upper_limit: e.target.value }))
+                  }
                   className={inputCls(fieldErrors?.upper_limit) + " w-36"}
                 />
                 {fieldErrors?.upper_limit && (
-                  <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.upper_limit}</p>
+                  <p className="text-[11px] text-rose-500 mt-1">
+                    {fieldErrors.upper_limit}
+                  </p>
                 )}
               </div>
               <div>
@@ -396,11 +466,18 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                   min="60"
                   max="3600"
                   value={form.poll_interval_sec}
-                  onChange={(e) => setForm((f) => ({ ...f, poll_interval_sec: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      poll_interval_sec: e.target.value,
+                    }))
+                  }
                   className={inputCls(fieldErrors?.poll_interval_sec) + " w-32"}
                 />
                 {fieldErrors?.poll_interval_sec && (
-                  <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.poll_interval_sec}</p>
+                  <p className="text-[11px] text-rose-500 mt-1">
+                    {fieldErrors.poll_interval_sec}
+                  </p>
                 )}
               </div>
             </div>
@@ -411,10 +488,12 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               <FiRotateCw className="text-amber-600" /> IN/OUT Auto-Stop Gap
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              On a rotating/cyclic line, scanning a gauge IN also automatically stops any running
-              test found in the gauges spanning this many positions <strong>ahead</strong> of it in
-              the sequence (e.g. gap 5 on gauge 15 sweeps gauges 16-20, wraps around). Set to 0 to
-              disable — tests will then only stop on their own timer or a manual Stop.
+              On a rotating/cyclic line, scanning a gauge IN also automatically
+              stops the gauge exactly this many positions <strong>ahead</strong>{" "}
+              of it in the sequence (e.g. gap 4 on gauge 15 stops only gauge 19,
+              wraps around). No other gauge is affected, and a skipped gauge in
+              between changes nothing. Set to 0 to disable — tests will then
+              only stop on their own timer or a manual Stop.
             </p>
             <input
               type="number"
@@ -424,7 +503,11 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               onChange={(e) => setForm((f) => ({ ...f, gap: e.target.value }))}
               className={inputCls(fieldErrors?.gap) + " w-32"}
             />
-            {fieldErrors?.gap && <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.gap}</p>}
+            {fieldErrors?.gap && (
+              <p className="text-[11px] text-rose-500 mt-1">
+                {fieldErrors.gap}
+              </p>
+            )}
           </div>
 
           <div className="mb-5 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
@@ -432,10 +515,11 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               <FiClock className="text-indigo-600" /> Minimum Test Duration
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              A test on this line always runs for at least this long, even if the IN/OUT
-              auto-stop above tries to end it sooner — its naturally accumulated PASS/FAIL still
-              stands once it does stop. Does <strong>not</strong> apply to a manual Stop, which
-              always takes effect immediately. Set to 0 to disable.
+              A test on this line always runs for at least this long, even if
+              the IN/OUT auto-stop above tries to end it sooner — its naturally
+              accumulated PASS/FAIL still stands once it does stop. Does{" "}
+              <strong>not</strong> apply to a manual Stop, which always takes
+              effect immediately. Set to 0 to disable.
             </p>
             <div className="flex items-center gap-2">
               <input
@@ -443,13 +527,17 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                 min="0"
                 max="3600"
                 value={form.min_duration_sec}
-                onChange={(e) => setForm((f) => ({ ...f, min_duration_sec: e.target.value }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, min_duration_sec: e.target.value }))
+                }
                 className={inputCls(fieldErrors?.min_duration_sec) + " w-32"}
               />
               <span className="text-xs text-slate-400">seconds</span>
             </div>
             {fieldErrors?.min_duration_sec && (
-              <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.min_duration_sec}</p>
+              <p className="text-[11px] text-rose-500 mt-1">
+                {fieldErrors.min_duration_sec}
+              </p>
             )}
           </div>
 
@@ -458,10 +546,11 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
               <FiClock className="text-sky-600" /> Reading Startup Delay
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              After a test starts, wait this many seconds before readings start counting toward
-              PASS/FAIL — lets the vacuum settle right after start instead of judging on an early,
-              still-ramping reading. Comes out of the overall test time rather than extending it.
-              Set to 0 to disable.
+              After a test starts, wait this many seconds before readings start
+              counting toward PASS/FAIL — lets the vacuum settle right after
+              start instead of judging on an early, still-ramping reading. Comes
+              out of the overall test time rather than extending it. Set to 0 to
+              disable.
             </p>
             <div className="flex items-center gap-2">
               <input
@@ -469,13 +558,17 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                 min="0"
                 max="3600"
                 value={form.reading_delay_sec}
-                onChange={(e) => setForm((f) => ({ ...f, reading_delay_sec: e.target.value }))}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, reading_delay_sec: e.target.value }))
+                }
                 className={inputCls(fieldErrors?.reading_delay_sec) + " w-32"}
               />
               <span className="text-xs text-slate-400">seconds</span>
             </div>
             {fieldErrors?.reading_delay_sec && (
-              <p className="text-[11px] text-rose-500 mt-1">{fieldErrors.reading_delay_sec}</p>
+              <p className="text-[11px] text-rose-500 mt-1">
+                {fieldErrors.reading_delay_sec}
+              </p>
             )}
           </div>
 
@@ -483,7 +576,10 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
             {form.hosts.map((h, hIdx) => {
               const hErr = fieldErrors?.hosts?.[hIdx];
               return (
-                <div key={hIdx} className="border rounded-lg p-4 bg-slate-50/60">
+                <div
+                  key={hIdx}
+                  className="border rounded-lg p-4 bg-slate-50/60"
+                >
                   <div className="flex items-center justify-between mb-3">
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                       <FiServer /> Host {hIdx + 1}
@@ -503,21 +599,33 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                     <div className="flex-1">
                       <input
                         value={h.host}
-                        onChange={(e) => updateHost(hIdx, { host: e.target.value })}
+                        onChange={(e) =>
+                          updateHost(hIdx, { host: e.target.value })
+                        }
                         placeholder="Host / IP, e.g. 192.168.0.3"
                         className={inputCls(hErr?.host)}
                       />
-                      {hErr?.host && <p className="text-[11px] text-rose-500 mt-1">{hErr.host}</p>}
+                      {hErr?.host && (
+                        <p className="text-[11px] text-rose-500 mt-1">
+                          {hErr.host}
+                        </p>
+                      )}
                     </div>
                     <div className="w-28">
                       <input
                         type="number"
                         value={h.port}
-                        onChange={(e) => updateHost(hIdx, { port: e.target.value })}
+                        onChange={(e) =>
+                          updateHost(hIdx, { port: e.target.value })
+                        }
                         placeholder="Port"
                         className={inputCls(hErr?.port)}
                       />
-                      {hErr?.port && <p className="text-[11px] text-rose-500 mt-1">{hErr.port}</p>}
+                      {hErr?.port && (
+                        <p className="text-[11px] text-rose-500 mt-1">
+                          {hErr.port}
+                        </p>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -544,7 +652,11 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                           <div className="flex-1">
                             <input
                               value={g.name}
-                              onChange={(e) => updateGauge(hIdx, gIdx, { name: e.target.value })}
+                              onChange={(e) =>
+                                updateGauge(hIdx, gIdx, {
+                                  name: e.target.value,
+                                })
+                              }
                               placeholder="Gauge name, e.g. Pirani_1"
                               className={inputCls(gErr?.name) + " py-1.5"}
                             />
@@ -554,7 +666,9 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                               type="number"
                               value={g.slave_id}
                               onChange={(e) =>
-                                updateGauge(hIdx, gIdx, { slave_id: e.target.value })
+                                updateGauge(hIdx, gIdx, {
+                                  slave_id: e.target.value,
+                                })
                               }
                               placeholder="Slave ID"
                               className={inputCls(gErr?.slave_id) + " py-1.5"}
@@ -565,7 +679,9 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
                               type="checkbox"
                               checked={g.enabled}
                               onChange={(e) =>
-                                updateGauge(hIdx, gIdx, { enabled: e.target.checked })
+                                updateGauge(hIdx, gIdx, {
+                                  enabled: e.target.checked,
+                                })
                               }
                             />
                             Enabled
@@ -624,7 +740,11 @@ export default function LineConfigModal({ open, mode, initial, onClose, onSave }
 
         {/* Footer */}
         <div className="px-6 py-4 border-t shrink-0">
-          {globalError && <p className="text-xs text-rose-500 font-medium mb-3">{globalError}</p>}
+          {globalError && (
+            <p className="text-xs text-rose-500 font-medium mb-3">
+              {globalError}
+            </p>
+          )}
           <div className="flex justify-end gap-3">
             <button
               type="button"
@@ -666,14 +786,17 @@ function TestResultSummary({ result }) {
       <p className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
         <FiCheckCircle />
         Reachable
-        {gauges.length > 0 && ` — ${responding}/${gauges.length} gauges responding`}
+        {gauges.length > 0 &&
+          ` — ${responding}/${gauges.length} gauges responding`}
       </p>
       {gauges.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
           {gauges.map((g) => (
             <span
               key={g.slave_id}
-              title={g.responding ? `Reading: ${g.value ?? "—"}` : "No response"}
+              title={
+                g.responding ? `Reading: ${g.value ?? "—"}` : "No response"
+              }
               className={`text-[11px] font-mono px-1.5 py-0.5 rounded ${
                 g.responding
                   ? "bg-emerald-100 text-emerald-700"
@@ -712,7 +835,9 @@ function QuickAddForm({ defaultStart, onGenerate, onCancel }) {
           />
         </div>
         <div>
-          <label className="block text-[11px] text-slate-500 mb-1">Start Slave ID</label>
+          <label className="block text-[11px] text-slate-500 mb-1">
+            Start Slave ID
+          </label>
           <input
             type="number"
             min="1"
@@ -723,7 +848,9 @@ function QuickAddForm({ defaultStart, onGenerate, onCancel }) {
           />
         </div>
         <div>
-          <label className="block text-[11px] text-slate-500 mb-1">Name Prefix</label>
+          <label className="block text-[11px] text-slate-500 mb-1">
+            Name Prefix
+          </label>
           <input
             value={prefix}
             onChange={(e) => setPrefix(e.target.value)}
@@ -748,8 +875,8 @@ function QuickAddForm({ defaultStart, onGenerate, onCancel }) {
       <p className="text-[11px] text-sky-700 mt-2">
         Creates "{prefix}
         {start || "?"}" … "{prefix}
-        {start && count ? Number(start) + Number(count) - 1 : "?"}" and replaces any empty rows on
-        this host.
+        {start && count ? Number(start) + Number(count) - 1 : "?"}" and replaces
+        any empty rows on this host.
       </p>
     </div>
   );

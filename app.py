@@ -152,17 +152,23 @@ def load_gauge_config_from_db():
 
 
 def auto_stop_cycle_gauge(line_key, in_gauge_id):
-    """After a new IN scan starts a test on in_gauge_id, this line's gap
-    setting means every gauge in the `gap` positions immediately *ahead* of
-    it is now in the exit window — scanning gauge 15 with gap=5 sweeps
-    gauges 16, 17, 18, 19, 20 (wrapping around if needed). Any of those that
-    still have a test running gets stopped, letting its naturally
-    accumulated PASS/FAIL stand (not ABORTED) — same outcome as a normal
-    timeout completion. Gauges in the window with no active test are simply
-    a no-op. If a swept gauge's test hasn't yet reached its line's minimum
-    test duration, stop_test() defers the actual stop rather than cutting it
-    short — it still counts as "stopped" here (the request was accepted).
-    Returns the list of gauge ids a stop was requested for (may be empty)."""
+    """IN/OUT cycle auto-stop. After a new IN scan starts a test on
+    in_gauge_id, this line's gap setting picks exactly ONE gauge to stop: the
+    gauge `gap` positions ahead of it in the line's cyclic sequence (the
+    "last" gauge of the cycle). Scanning gauge 15 with gap=4 stops gauge 19
+    and nothing else.
+
+    No other gauge is touched. If a gauge in between was skipped (empty /
+    reworked product, never scanned) it is simply left alone, and gauges that
+    are running ahead of the window are never stopped early. If the target
+    gauge has no active test (e.g. it was skipped) this is a no-op.
+
+    The target's naturally accumulated PASS/FAIL stands (not ABORTED), same as
+    a normal timeout completion. If its test hasn't yet reached the line's
+    minimum test duration, stop_test() defers the actual stop rather than
+    cutting it short.
+    Returns a list with the one gauge id a stop was requested for (empty if
+    nothing was stopped)."""
     with CONFIG_LOCK:
         gap = LINE_GAP.get(line_key, 0)
         order = list(LINE_GAUGE_ORDER.get(line_key, []))
@@ -172,19 +178,18 @@ def auto_stop_cycle_gauge(line_key, in_gauge_id):
 
     idx = order.index(in_gauge_id)
     n = len(order)
-    span = min(gap, n - 1)  # never wrap far enough to include in_gauge_id itself
+    target = order[(idx + gap) % n]
+    if target == in_gauge_id:  # gap is a whole number of laps; nothing to stop
+        return []
 
-    stopped = []
-    for offset in range(1, span + 1):
-        target = order[(idx + offset) % n]
-        if stop_test(target, manual=False):
-            stopped.append(target)
-            logger.info(
-                "IN/OUT cycle: gauge %s scanned IN -> auto-stopping gauge %s "
-                "(%s of %s positions ahead, gap=%s, line=%s)",
-                in_gauge_id, target, offset, span, gap, line_key,
-            )
-    return stopped
+    if stop_test(target, manual=False):
+        logger.info(
+            "IN/OUT cycle: gauge %s scanned IN -> auto-stopping gauge %s "
+            "(exactly %s positions ahead, line=%s)",
+            in_gauge_id, target, gap, line_key,
+        )
+        return [target]
+    return []
 
 
 def _gauges_for_host(host, port):

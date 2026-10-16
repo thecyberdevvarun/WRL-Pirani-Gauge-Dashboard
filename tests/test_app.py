@@ -385,29 +385,26 @@ def test_start_test_triggers_auto_stop_on_cycle_gauge(monkeypatch, client):
     payload = {"serial_no": "S123", "model_code": "M1", "gauge_id": 1}
     rv = client.post("/start-test", data=json.dumps(payload), content_type="application/json")
     assert rv.status_code == 200
-    assert stopped_calls == [(2, False), (3, False)]
+    assert stopped_calls == [(3, False)]  # exactly gap=2 ahead of gauge 1
 
-    # gauge 5 is position 4 (0-indexed); sweeps positions 0 and 1 -> gauges 1, 2 (wraps around).
+    # gauge 5 is position 4 (0-indexed); exactly 2 ahead wraps around to position 1 -> gauge 2.
     stopped_calls.clear()
     payload = {"serial_no": "S124", "model_code": "M1", "gauge_id": 5}
     rv = client.post("/start-test", data=json.dumps(payload), content_type="application/json")
     assert rv.status_code == 200
-    assert stopped_calls == [(1, False), (2, False)]
+    assert stopped_calls == [(2, False)]
 
 
-def test_start_test_auto_stop_sweeps_whole_gap_window(monkeypatch, client):
-    """Matches the reported real-world case: on a 30-gauge line with gap=5,
-    scanning gauge 15 IN must stop ANY running test in gauges 16-20 (ahead
-    of it in the sequence), not just gauge 20. Only gauges that are actually
-    running (per stop_test's own no-op-if-not-running behavior) end up
-    reflected as stopped; here we simulate gauges 17 and 19 as the only ones
-    currently running."""
+def test_start_test_auto_stop_only_stops_gauge_exactly_gap_ahead(monkeypatch, client):
+    """On a 30-gauge line with gap=4, scanning gauge 15 IN must stop ONLY
+    gauge 19. Other running gauges ahead of it (16-18, 20+) are not touched,
+    and a skipped gauge in between does not change that."""
 
     def fake_run_test(serial_no, model_code, model_name, line_name, slave_id, host, port,
                        upper_limit, poll_interval_sec, reading_delay_sec=0, min_duration_sec=0):
         return {"status": "STARTED", "test_id": "fake-id", "message": "ok"}
 
-    running = {17, 19}
+    running = {16, 17, 18, 19, 20, 21}
     attempted = []
     stopped = []
 
@@ -415,6 +412,7 @@ def test_start_test_auto_stop_sweeps_whole_gap_window(monkeypatch, client):
         attempted.append(gauge_id)
         if gauge_id in running:
             stopped.append(gauge_id)
+            running.discard(gauge_id)
             return True
         return False
 
@@ -428,17 +426,33 @@ def test_start_test_auto_stop_sweeps_whole_gap_window(monkeypatch, client):
         for sid in range(1, 31)
     })
     application.LINE_GAP.clear()
-    application.LINE_GAP.update({"VISI_COOLER": 5})
+    application.LINE_GAP.update({"VISI_COOLER": 4})
     application.LINE_GAUGE_ORDER.clear()
     application.LINE_GAUGE_ORDER.update({"VISI_COOLER": list(range(1, 31))})
 
-    payload = {"serial_no": "S123", "model_code": "M1", "gauge_id": 15}
-    rv = client.post("/start-test", data=json.dumps(payload), content_type="application/json")
-    assert rv.status_code == 200
-    # Every gauge from 16 up to 20 gets a stop attempt (nearest first)...
-    assert attempted == [16, 17, 18, 19, 20]
-    # ...but only the ones actually running are reported as stopped.
-    assert stopped == [17, 19]
+    def scan(gid):
+        payload = {"serial_no": f"S{gid}", "model_code": "M1", "gauge_id": gid}
+        rv = client.post("/start-test", data=json.dumps(payload), content_type="application/json")
+        assert rv.status_code == 200
+
+    scan(15)
+    assert attempted == [19]
+    assert stopped == [19]
+    assert running == {16, 17, 18, 20, 21}  # neighbours keep running
+
+    # Gauge 16 is skipped (rework, no scan). Scanning 17 only targets 21.
+    attempted.clear(); stopped.clear()
+    scan(17)
+    assert attempted == [21]
+    assert stopped == [21]
+    assert running == {16, 17, 18, 20}
+
+    # Target not running (e.g. skipped gauge): nothing is stopped, no side effects.
+    attempted.clear(); stopped.clear()
+    scan(26)  # target = 30, not running
+    assert attempted == [30]
+    assert stopped == []
+    assert running == {16, 17, 18, 20}
 
     application.LINE_GAP.clear()
     application.LINE_GAUGE_ORDER.clear()
