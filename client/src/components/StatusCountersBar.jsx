@@ -1,5 +1,4 @@
-import { FiMaximize, FiBarChart2 } from "react-icons/fi";
-import { Link } from "react-router-dom";
+import { FiMaximize } from "react-icons/fi";
 
 const DOT = "w-3 h-3 rounded-full inline-block";
 
@@ -38,12 +37,6 @@ export default function StatusCountersBar({ counts }) {
         >
           <FiMaximize /> Fullscreen
         </button>
-        <Link
-          to="/reports"
-          className="flex items-center gap-1.5 border px-3 py-1.5 rounded hover:bg-slate-50 text-slate-600"
-        >
-          <FiBarChart2 /> Full Reports
-        </Link>
       </div>
     </div>
   );

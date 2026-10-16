@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
-import TodayStatsBar from "../components/TodayStatsBar";
 import StatusCountersBar from "../components/StatusCountersBar";
 import StatusLegend from "../components/StatusLegend";
 import ConveyorTrack from "../components/ConveyorTrack";
@@ -85,10 +84,9 @@ export default function FixturesPage() {
 
   return (
     <>
-      <TodayStatsBar />
       <StatusCountersBar counts={counts} />
 
-      <div className="p-4 max-w-[1900px] mx-auto">
+      <div className="p-4 max-w-475 mx-auto">
         <StatusLegend />
 
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_420px] gap-5 items-start">

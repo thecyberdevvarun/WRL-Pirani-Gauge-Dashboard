@@ -9,12 +9,27 @@ function extractModelCode(serial) {
 }
 
 function validateSerial(serial) {
-  if (serial.length !== 15)
-    return { ok: false, msg: "Serial must be exactly 15 characters" };
-  if (!serial.startsWith("S4"))
-    return { ok: false, msg: "Serial must start with S4" };
-  if (!/^S4\d{13}$/.test(serial))
-    return { ok: false, msg: "Invalid serial format (S4 + 13 digits)" };
+  if (serial.length !== 15) {
+    return {
+      ok: false,
+      msg: "Serial must be exactly 15 characters",
+    };
+  }
+
+  if (!serial.startsWith("S4")) {
+    return {
+      ok: false,
+      msg: "Serial must start with S4",
+    };
+  }
+
+  if (!/^S4\d{13}$/.test(serial)) {
+    return {
+      ok: false,
+      msg: "Invalid serial format (S4 + 13 digits)",
+    };
+  }
+
   return { ok: true };
 }
 
@@ -31,40 +46,87 @@ export default function ScanPanel({
   const [modelCode, setModelCode] = useState("");
   const [modelName, setModelName] = useState("");
   const [starting, setStarting] = useState(false);
+
   const serialRef = useRef(null);
   const gaugeRef = useRef(null);
+  const startButtonRef = useRef(null);
 
+  // Focus Serial Number on page load and restore focus when
+  // the user clicks outside the scanning controls.
   useEffect(() => {
-    serialRef.current?.focus();
+    const focusSerial = () => {
+      serialRef.current?.focus({ preventScroll: true });
+    };
+
+    focusSerial();
+
+    const handleFocusOut = () => {
+      requestAnimationFrame(() => {
+        const activeElement = document.activeElement;
+
+        // Keep focus while entering Gauge ID.
+        if (activeElement === gaugeRef.current) return;
+
+        // Allow interaction with the Start Test button.
+        if (activeElement === startButtonRef.current) return;
+
+        // Do not disturb the serial field if it already has focus.
+        if (activeElement === serialRef.current) return;
+
+        focusSerial();
+      });
+    };
+
+    document.addEventListener("focusout", handleFocusOut);
+
+    return () => {
+      document.removeEventListener("focusout", handleFocusOut);
+    };
   }, []);
 
   const handleSerialChange = (e) => {
-    const v = e.target.value;
-    setSerial(v);
-    // Scanners type the full serial instantly — jump on to Gauge ID once it is complete.
-    if (validateSerial(v.trim()).ok) gaugeRef.current?.focus();
+    const value = e.target.value;
+    setSerial(value);
+
+    // Move to Gauge ID as soon as a valid serial is complete.
+    if (validateSerial(value.trim()).ok) {
+      requestAnimationFrame(() => {
+        gaugeRef.current?.focus({ preventScroll: true });
+      });
+    }
   };
 
   const handleSerialKeyDown = (e) => {
     if (e.key !== "Enter") return;
+
     e.preventDefault();
-    gaugeRef.current?.focus();
+
+    // Enter moves to Gauge ID.
+    gaugeRef.current?.focus({ preventScroll: true });
   };
 
   const handleGaugeKeyDown = (e) => {
     if (e.key !== "Enter") return;
+
     e.preventDefault();
-    if (!starting) handleStart();
+
+    if (!starting) {
+      handleStart();
+    }
   };
 
   const handleSerialBlur = async () => {
-    const s = serial.trim();
-    const v = validateSerial(s);
-    if (!v.ok) return;
-    const code = extractModelCode(s);
+    const value = serial.trim();
+    const validation = validateSerial(value);
+
+    if (!validation.ok) return;
+
+    const code = extractModelCode(value);
     setModelCode(code);
+
     try {
       const material = await getMaterialByCode(code);
+
       setModelName(material.exists ? material.name : "UNKNOWN MODEL");
     } catch {
       setModelName("UNKNOWN MODEL");
@@ -72,44 +134,64 @@ export default function ScanPanel({
   };
 
   const handleStart = async () => {
-    if (!line) return toast.error("No line selected — please log in again");
+    if (!line) {
+      return toast.error("No line selected — please log in again");
+    }
 
     const serialNo = serial.trim();
     const gid = parseInt(gaugeId, 10);
 
-    if (!serialNo) return toast.error("Serial number required");
-    const v = validateSerial(serialNo);
-    if (!v.ok) return toast.error(v.msg);
-    if (!gid || !gaugeIds.includes(gid))
+    if (!serialNo) {
+      return toast.error("Serial number required");
+    }
+
+    const validation = validateSerial(serialNo);
+
+    if (!validation.ok) {
+      return toast.error(validation.msg);
+    }
+
+    if (!gid || !gaugeIds.includes(gid)) {
       return toast.error("Enter a valid Gauge ID for this line");
+    }
 
     const code = extractModelCode(serialNo);
+
     setStarting(true);
+
     try {
-      // Display-only — a missing Material record no longer blocks starting a test.
+      // Material lookup is informational and does not block the test.
       const material = await getMaterialByCode(code).catch(() => ({
         exists: false,
         name: null,
       }));
+
       setModelCode(code);
       setModelName(material.exists ? material.name : "UNKNOWN MODEL");
 
-      const res = await startTestApi({
+      const response = await startTestApi({
         serial_no: serialNo,
         gauge_id: gid,
         line,
         model_code: code,
       });
-      if (res.status === "STARTED") {
+
+      if (response.status === "STARTED") {
         toast.success(`Test started on Gauge ${gid}`);
+
         setSerial("");
         onGaugeIdChange("");
         setModelCode("");
         setModelName("");
+
         onStarted?.();
-        serialRef.current?.focus();
+
+        // Ready for the next serial scan.
+        requestAnimationFrame(() => {
+          serialRef.current?.focus({ preventScroll: true });
+        });
       } else {
-        toast.error(res.message || "Error starting test");
+        toast.error(response.message || "Error starting test");
       }
     } catch {
       toast.error("Network error — check server");
@@ -123,6 +205,7 @@ export default function ScanPanel({
       <h3 className="text-base font-semibold text-emerald-600 mb-1 font-display flex items-center gap-1.5">
         <FiPlay /> Start Test
       </h3>
+
       <p className="text-xs text-slate-400 mb-4">
         Line:{" "}
         <span className="font-semibold text-slate-600">{lineLabel || "—"}</span>
@@ -130,6 +213,7 @@ export default function ScanPanel({
       </p>
 
       <label className="block text-xs mb-1 text-slate-500">Serial Number</label>
+
       <input
         ref={serialRef}
         value={serial}
@@ -137,21 +221,24 @@ export default function ScanPanel({
         onKeyDown={handleSerialKeyDown}
         onBlur={handleSerialBlur}
         placeholder="Scan or type serial"
+        autoComplete="off"
         className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
       />
 
       <label className="block text-xs mb-1 text-slate-500">Gauge ID</label>
+
       <input
         ref={gaugeRef}
         type="number"
         value={gaugeId}
         onKeyDown={handleGaugeKeyDown}
         onChange={(e) => onGaugeIdChange(e.target.value)}
-        placeholder={gaugeIds.length ? "e.g. " + gaugeIds[0] : "—"}
+        placeholder={gaugeIds.length ? `e.g. ${gaugeIds[0]}` : "—"}
         className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
       />
 
       <label className="block text-xs mb-1 text-slate-500">Model Code</label>
+
       <input
         disabled
         value={modelCode}
@@ -160,6 +247,7 @@ export default function ScanPanel({
       />
 
       <label className="block text-xs mb-1 text-slate-500">Model Name</label>
+
       <input
         disabled
         value={modelName}
@@ -168,6 +256,7 @@ export default function ScanPanel({
       />
 
       <button
+        ref={startButtonRef}
         type="button"
         onClick={handleStart}
         disabled={starting}
@@ -178,7 +267,7 @@ export default function ScanPanel({
 
       <p className="text-xs text-slate-400 mt-2 text-center">
         Serial format: <code className="bg-slate-100 px-1 rounded">S4</code> +
-        4-digit model code + 9 digits
+        13 digits
       </p>
     </section>
   );
