@@ -33,30 +33,28 @@ function validateSerial(serial) {
   return { ok: true };
 }
 
-// Same idea as validateSerial, but for the Gauge ID field:
-// only a 1/2 digit gauge number (like 1 or 18) that exists on this line.
-function validateGauge(value, gaugeIds, maxDigits) {
+// Accept any gauge ID with 1 or 2 digits.
+// Gauge ID does not have to exist in gaugeIds.
+function validateGauge(value) {
   if (!value) {
-    return { ok: false, msg: "Gauge ID required" };
-  }
-
-  if (!/^\d+$/.test(value)) {
-    return { ok: false, msg: "Gauge ID must contain digits only" };
-  }
-
-  if (value.length > maxDigits) {
     return {
       ok: false,
-      msg: `Gauge ID can be at most ${maxDigits} digit${maxDigits > 1 ? "s" : ""}`,
+      msg: "Gauge ID required",
+    };
+  }
+
+  if (!/^\d{1,2}$/.test(value)) {
+    return {
+      ok: false,
+      msg: "Gauge ID must contain only 1 or 2 digits",
     };
   }
 
   if (value.startsWith("0")) {
-    return { ok: false, msg: "Gauge ID cannot start with 0" };
-  }
-
-  if (!gaugeIds.includes(parseInt(value, 10))) {
-    return { ok: false, msg: `Gauge ${value} is not available on this line` };
+    return {
+      ok: false,
+      msg: "Gauge ID cannot start with 0",
+    };
   }
 
   return { ok: true };
@@ -64,7 +62,7 @@ function validateGauge(value, gaugeIds, maxDigits) {
 
 export default function ScanPanel({
   gaugeId,
-  gaugeIds,
+  gaugeIds = [],
   lineLabel,
   onGaugeIdChange,
   onStarted,
@@ -80,56 +78,32 @@ export default function ScanPanel({
   const gaugeRef = useRef(null);
   const startButtonRef = useRef(null);
 
-  // Gauge field is locked until a complete, valid serial is entered.
+  // Gauge ID remains locked until the serial is valid.
   const serialValid = validateSerial(serial.trim()).ok;
 
-  // Digits allowed = digits in the highest gauge id of this line (54 -> 2).
-  const maxGaugeDigits = gaugeIds?.length
-    ? String(Math.max(...gaugeIds)).length
-    : 2;
+  const gaugeValue = String(gaugeId ?? "");
+  const gaugeValidation = validateGauge(gaugeValue);
+  const gaugeTouched = gaugeValue !== "";
 
-  const gaugeValidation = validateGauge(
-    String(gaugeId ?? ""),
-    gaugeIds || [],
-    maxGaugeDigits,
-  );
-  const gaugeTouched = String(gaugeId ?? "") !== "";
-  const canStart = serialValid && gaugeValidation.ok;
+  const canStart = serialValid && gaugeValidation.ok && !starting;
 
-  // Timing refs used to ignore the scanner's trailing Enter / detect scans.
-  const lastGaugeKeyTime = useRef(0);
-  const lastScanBlockedAt = useRef(0);
+  // Prevent the serial scanner's trailing Enter from starting a test.
   const gaugeFocusedAt = useRef(0);
 
-  const rejectGaugeInput = () => {
-    lastScanBlockedAt.current = Date.now();
-    onGaugeIdChange("");
-    toast.error(
-      "Gauge ID accepts only the gauge number (e.g. 1 or 18). Scan the serial in the Serial Number field.",
-      { id: "gauge-scan-blocked" },
-    );
+  const focusSerial = () => {
+    serialRef.current?.focus({ preventScroll: true });
   };
 
-  // Focus Serial Number on page load and restore focus when
-  // the user clicks outside the scanning controls.
+  // Initial focus and focus management.
   useEffect(() => {
-    const focusSerial = () => {
-      serialRef.current?.focus({ preventScroll: true });
-    };
-
     focusSerial();
 
     const handleFocusOut = () => {
       requestAnimationFrame(() => {
         const activeElement = document.activeElement;
 
-        // Keep focus while entering Gauge ID.
         if (activeElement === gaugeRef.current) return;
-
-        // Allow interaction with the Start Test button.
         if (activeElement === startButtonRef.current) return;
-
-        // Do not disturb the serial field if it already has focus.
         if (activeElement === serialRef.current) return;
 
         focusSerial();
@@ -143,15 +117,12 @@ export default function ScanPanel({
     };
   }, []);
 
-  // As soon as the serial becomes valid the Gauge field unlocks and gets focus.
-  // (Done in an effect so the input is already enabled when we focus it.)
+  // Unlock and focus Gauge ID when serial becomes valid.
   useEffect(() => {
     if (serialValid) {
       gaugeFocusedAt.current = Date.now();
-      lastGaugeKeyTime.current = 0;
       gaugeRef.current?.focus({ preventScroll: true });
     } else if (gaugeId) {
-      // Serial was edited/cleared -> the gauge entry is no longer trustworthy.
       onGaugeIdChange("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -166,80 +137,71 @@ export default function ScanPanel({
 
     e.preventDefault();
 
-    const validation = validateSerial(serial.trim());
+    const value = serial.trim();
+    const validation = validateSerial(value);
 
     if (!validation.ok) {
       toast.error(validation.msg, { id: "serial-invalid" });
       return;
     }
 
-    // Valid serial: Enter moves to Gauge ID.
     gaugeFocusedAt.current = Date.now();
     gaugeRef.current?.focus({ preventScroll: true });
   };
 
+  // No scanner-speed detection. Zebra scanners type faster than humans,
+  // and fast input must not be mistaken for an invalid gauge scan.
   const handleGaugeKeyDown = (e) => {
-    // Enter => start the test
     if (e.key === "Enter") {
       e.preventDefault();
 
-      // Ignore the scanner's trailing Enter (arrives right after focus jumps
-      // here from the serial field, or right after a blocked scan).
-      const now = Date.now();
-      if (
-        now - gaugeFocusedAt.current < 150 ||
-        now - lastScanBlockedAt.current < 500
-      ) {
+      // Ignore Enter arriving immediately after focus switches to Gauge ID.
+      if (Date.now() - gaugeFocusedAt.current < 250) {
         return;
       }
 
-      if (!starting) handleStart();
+      if (!starting) {
+        handleStart();
+      }
+
       return;
     }
 
-    // Let navigation / editing keys and shortcuts through (Backspace, arrows, Ctrl+A ...)
+    // Allow shortcuts and editing/navigation keys.
     if (e.ctrlKey || e.metaKey || e.altKey || e.key.length > 1) {
-      lastGaugeKeyTime.current = 0;
       return;
     }
 
-    const now = Date.now();
-    const gap = now - lastGaugeKeyTime.current;
-    lastGaugeKeyTime.current = now;
-
-    // Any non-digit (a scanned serial starts with "S4...") is blocked.
+    // Allow digits only.
     if (!/^\d$/.test(e.key)) {
       e.preventDefault();
-      rejectGaugeInput();
       return;
     }
 
-    // Keys arriving < 35 ms apart = barcode scanner, not a human typing.
-    if (gap > 0 && gap < 35) {
+    // Never allow more than two digits.
+    if (e.currentTarget.value.length >= 2) {
       e.preventDefault();
-      rejectGaugeInput();
     }
   };
 
   const handleGaugeChange = (e) => {
-    const digits = e.target.value.replace(/\D/g, "");
+    const value = e.target.value;
 
-    // Too many digits => it was a scan/paste, clear it.
-    if (digits.length > maxGaugeDigits) {
-      rejectGaugeInput();
+    // Accept empty input while editing, or any 1-2 digit number.
+    // Do not reject based on scanner speed or configured gauge lists.
+    if (!/^\d{0,2}$/.test(value)) {
       return;
     }
 
-    onGaugeIdChange(digits);
+    onGaugeIdChange(value);
   };
 
   const handleGaugePaste = (e) => {
     const text = (e.clipboardData.getData("text") || "").trim();
-    const pattern = new RegExp(`^\\d{1,${maxGaugeDigits}}$`);
 
-    if (!pattern.test(text)) {
+    if (!/^\d{1,2}$/.test(text)) {
       e.preventDefault();
-      rejectGaugeInput();
+      toast.error("Gauge ID must contain only 1 or 2 digits");
     }
   };
 
@@ -254,7 +216,6 @@ export default function ScanPanel({
 
     try {
       const material = await getMaterialByCode(code);
-
       setModelName(material.exists ? material.name : "UNKNOWN MODEL");
     } catch {
       setModelName("UNKNOWN MODEL");
@@ -262,39 +223,36 @@ export default function ScanPanel({
   };
 
   const handleStart = async () => {
+    if (starting) return;
+
     if (!line) {
-      return toast.error("No line selected — please log in again");
+      toast.error("No line selected — please log in again");
+      return;
     }
 
     const serialNo = serial.trim();
 
-    if (!serialNo) {
-      return toast.error("Serial number required");
+    const serialCheck = validateSerial(serialNo);
+
+    if (!serialCheck.ok) {
+      toast.error(serialCheck.msg);
+      return;
     }
 
-    const validation = validateSerial(serialNo);
-
-    if (!validation.ok) {
-      return toast.error(validation.msg);
-    }
-
-    const gaugeCheck = validateGauge(
-      String(gaugeId ?? ""),
-      gaugeIds || [],
-      maxGaugeDigits,
-    );
+    const gaugeCheck = validateGauge(String(gaugeId ?? ""));
 
     if (!gaugeCheck.ok) {
-      return toast.error(gaugeCheck.msg);
+      toast.error(gaugeCheck.msg);
+      return;
     }
 
-    const gid = parseInt(gaugeId, 10);
+    const gid = Number(gaugeId);
     const code = extractModelCode(serialNo);
 
     setStarting(true);
 
     try {
-      // Material lookup is informational and does not block the test.
+      // Material lookup is informational; it must not block the test.
       const material = await getMaterialByCode(code).catch(() => ({
         exists: false,
         name: null,
@@ -320,9 +278,8 @@ export default function ScanPanel({
 
         onStarted?.();
 
-        // Ready for the next serial scan.
         requestAnimationFrame(() => {
-          serialRef.current?.focus({ preventScroll: true });
+          focusSerial();
         });
       } else {
         toast.error(response.message || "Error starting test");
@@ -371,22 +328,13 @@ export default function ScanPanel({
         type="text"
         inputMode="numeric"
         autoComplete="off"
-        disabled={!serialValid}
-        maxLength={maxGaugeDigits}
-        value={gaugeId}
-        onFocus={() => {
-          lastGaugeKeyTime.current = 0;
-        }}
+        disabled={!serialValid || starting}
+        maxLength={2}
+        value={gaugeValue}
         onKeyDown={handleGaugeKeyDown}
         onChange={handleGaugeChange}
         onPaste={handleGaugePaste}
-        placeholder={
-          !serialValid
-            ? "Locked"
-            : gaugeIds.length
-              ? `e.g. ${gaugeIds[0]}`
-              : "—"
-        }
+        placeholder={!serialValid ? "Locked" : "Scan or enter gauge ID"}
         className={`w-full px-3 py-2 rounded border outline-none text-sm disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
           serialValid && gaugeTouched && !gaugeValidation.ok
             ? "border-red-400 focus:border-red-500"
@@ -428,7 +376,7 @@ export default function ScanPanel({
         ref={startButtonRef}
         type="button"
         onClick={handleStart}
-        disabled={starting || !canStart}
+        disabled={!canStart}
         className="w-full py-3 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-base transition"
       >
         {starting ? "Starting…" : "START TEST"}
@@ -437,6 +385,8 @@ export default function ScanPanel({
       <p className="text-xs text-slate-400 mt-2 text-center">
         Serial format: <code className="bg-slate-100 px-1 rounded">S4</code> +
         13 digits
+        <br />
+        Gauge ID: any 1 or 2 digit number
       </p>
     </section>
   );
