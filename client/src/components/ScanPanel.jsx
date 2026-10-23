@@ -9,21 +9,23 @@ function extractModelCode(serial) {
 }
 
 function validateSerial(serial) {
-  if (serial.length !== 15) {
+  const normalizedSerial = serial.trim().toUpperCase();
+
+  if (normalizedSerial.length !== 15) {
     return {
       ok: false,
       msg: "Serial must be exactly 15 characters",
     };
   }
 
-  if (!serial.startsWith("S4")) {
+  if (!normalizedSerial.startsWith("S4")) {
     return {
       ok: false,
       msg: "Serial must start with S4",
     };
   }
 
-  if (!/^S4\d{13}$/.test(serial)) {
+  if (!/^S4\d{13}$/.test(normalizedSerial)) {
     return {
       ok: false,
       msg: "Invalid serial format (S4 + 13 digits)",
@@ -34,7 +36,6 @@ function validateSerial(serial) {
 }
 
 // Accept any gauge ID with 1 or 2 digits.
-// Gauge ID does not have to exist in gaugeIds.
 function validateGauge(value) {
   if (!value) {
     return {
@@ -73,12 +74,18 @@ export default function ScanPanel({
   const [modelCode, setModelCode] = useState("");
   const [modelName, setModelName] = useState("");
   const [starting, setStarting] = useState(false);
+  const [serialLockedState, setSerialLockedState] = useState(false);
 
   const serialRef = useRef(null);
   const gaugeRef = useRef(null);
   const startButtonRef = useRef(null);
 
-  // Gauge ID remains locked until the serial is valid.
+  // Ref prevents duplicate scans before React re-renders.
+  const serialLocked = useRef(false);
+
+  // Tracks the time Gauge ID receives focus.
+  const gaugeFocusedAt = useRef(0);
+
   const serialValid = validateSerial(serial.trim()).ok;
 
   const gaugeValue = String(gaugeId ?? "");
@@ -87,11 +94,24 @@ export default function ScanPanel({
 
   const canStart = serialValid && gaugeValidation.ok && !starting;
 
-  // Prevent the serial scanner's trailing Enter from starting a test.
-  const gaugeFocusedAt = useRef(0);
-
   const focusSerial = () => {
     serialRef.current?.focus({ preventScroll: true });
+  };
+
+  const lockSerial = () => {
+    serialLocked.current = true;
+    setSerialLockedState(true);
+
+    gaugeFocusedAt.current = Date.now();
+
+    requestAnimationFrame(() => {
+      gaugeRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const unlockSerial = () => {
+    serialLocked.current = false;
+    setSerialLockedState(false);
   };
 
   // Initial focus and focus management.
@@ -106,6 +126,12 @@ export default function ScanPanel({
         if (activeElement === startButtonRef.current) return;
         if (activeElement === serialRef.current) return;
 
+        // Do not steal focus while the serial is locked.
+        if (serialLocked.current) {
+          gaugeRef.current?.focus({ preventScroll: true });
+          return;
+        }
+
         focusSerial();
       });
     };
@@ -117,19 +143,32 @@ export default function ScanPanel({
     };
   }, []);
 
-  // Unlock and focus Gauge ID when serial becomes valid.
+  // Keep Gauge ID cleared until a valid serial is entered.
   useEffect(() => {
     if (serialValid) {
-      gaugeFocusedAt.current = Date.now();
-      gaugeRef.current?.focus({ preventScroll: true });
-    } else if (gaugeId) {
+      if (!serialLocked.current) {
+        lockSerial();
+      }
+    } else if (!serialLocked.current && gaugeId) {
       onGaugeIdChange("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serialValid]);
 
+  // Accept only one valid serial.
   const handleSerialChange = (e) => {
-    setSerial(e.target.value);
+    if (serialLocked.current) return;
+
+    const value = e.target.value.toUpperCase();
+
+    // Prevent extra characters from being appended to a serial.
+    const nextValue = value.slice(0, 15);
+
+    setSerial(nextValue);
+
+    if (validateSerial(nextValue).ok) {
+      lockSerial();
+    }
   };
 
   const handleSerialKeyDown = (e) => {
@@ -137,7 +176,13 @@ export default function ScanPanel({
 
     e.preventDefault();
 
-    const value = serial.trim();
+    // Ignore trailing Enter or extra input after a serial is accepted.
+    if (serialLocked.current) {
+      gaugeRef.current?.focus({ preventScroll: true });
+      return;
+    }
+
+    const value = serial.trim().toUpperCase();
     const validation = validateSerial(value);
 
     if (!validation.ok) {
@@ -145,17 +190,15 @@ export default function ScanPanel({
       return;
     }
 
-    gaugeFocusedAt.current = Date.now();
-    gaugeRef.current?.focus({ preventScroll: true });
+    setSerial(value);
+    lockSerial();
   };
 
-  // No scanner-speed detection. Zebra scanners type faster than humans,
-  // and fast input must not be mistaken for an invalid gauge scan.
   const handleGaugeKeyDown = (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
 
-      // Ignore Enter arriving immediately after focus switches to Gauge ID.
+      // Ignore the serial scanner's trailing Enter.
       if (Date.now() - gaugeFocusedAt.current < 250) {
         return;
       }
@@ -187,8 +230,6 @@ export default function ScanPanel({
   const handleGaugeChange = (e) => {
     const value = e.target.value;
 
-    // Accept empty input while editing, or any 1-2 digit number.
-    // Do not reject based on scanner speed or configured gauge lists.
     if (!/^\d{0,2}$/.test(value)) {
       return;
     }
@@ -206,16 +247,16 @@ export default function ScanPanel({
   };
 
   const handleSerialBlur = async () => {
-    const value = serial.trim();
-    const validation = validateSerial(value);
+    const value = serial.trim().toUpperCase();
 
-    if (!validation.ok) return;
+    if (!validateSerial(value).ok) return;
 
     const code = extractModelCode(value);
     setModelCode(code);
 
     try {
       const material = await getMaterialByCode(code);
+
       setModelName(material.exists ? material.name : "UNKNOWN MODEL");
     } catch {
       setModelName("UNKNOWN MODEL");
@@ -230,8 +271,7 @@ export default function ScanPanel({
       return;
     }
 
-    const serialNo = serial.trim();
-
+    const serialNo = serial.trim().toUpperCase();
     const serialCheck = validateSerial(serialNo);
 
     if (!serialCheck.ok) {
@@ -252,7 +292,7 @@ export default function ScanPanel({
     setStarting(true);
 
     try {
-      // Material lookup is informational; it must not block the test.
+      // Material lookup is informational.
       const material = await getMaterialByCode(code).catch(() => ({
         exists: false,
         name: null,
@@ -275,6 +315,9 @@ export default function ScanPanel({
         onGaugeIdChange("");
         setModelCode("");
         setModelName("");
+
+        // Unlock for the next serial scan.
+        unlockSerial();
 
         onStarted?.();
 
@@ -311,9 +354,10 @@ export default function ScanPanel({
         onChange={handleSerialChange}
         onKeyDown={handleSerialKeyDown}
         onBlur={handleSerialBlur}
+        readOnly={serialLockedState}
         placeholder="Scan or type serial"
         autoComplete="off"
-        className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm"
+        className="w-full mb-3 px-3 py-2 rounded border focus:border-emerald-600 outline-none text-sm read-only:bg-slate-100"
       />
 
       <label className="block text-xs mb-1 text-slate-500">
