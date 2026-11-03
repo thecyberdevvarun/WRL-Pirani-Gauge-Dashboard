@@ -11,24 +11,25 @@ function extractModelCode(serial) {
 function validateSerial(serial) {
   const normalizedSerial = serial.trim().toUpperCase();
 
-  if (normalizedSerial.length !== 15) {
-    return {
-      ok: false,
-      msg: "Serial must be exactly 15 characters",
-    };
-  }
-
+  // Assembly barcode must start with S4
   if (!normalizedSerial.startsWith("S4")) {
     return {
       ok: false,
-      msg: "Serial must start with S4",
+      msg: "Invalid Barcode! Only Assembly barcode (S4) is allowed.",
+    };
+  }
+
+  if (normalizedSerial.length !== 15) {
+    return {
+      ok: false,
+      msg: "Assembly Serial must be exactly 15 characters",
     };
   }
 
   if (!/^S4\d{13}$/.test(normalizedSerial)) {
     return {
       ok: false,
-      msg: "Invalid serial format (S4 + 13 digits)",
+      msg: "Invalid Assembly barcode format (S4 + 13 digits)",
     };
   }
 
@@ -161,7 +162,22 @@ export default function ScanPanel({
 
     const value = e.target.value.toUpperCase();
 
-    // Prevent extra characters from being appended to a serial.
+    // Reject anything that doesn't start with S
+    if (value.length > 0 && value[0] !== "S") {
+      toast.error("Only Assembly barcode (S4) is allowed!", {
+        id: "invalid-barcode",
+      });
+      return;
+    }
+
+    // Reject anything that doesn't start with S4
+    if (value.length >= 2 && !value.startsWith("S4")) {
+      toast.error("Invalid Barcode! Only S4 Assembly barcode is allowed!", {
+        id: "invalid-barcode",
+      });
+      return;
+    }
+
     const nextValue = value.slice(0, 15);
 
     setSerial(nextValue);
